@@ -30,6 +30,7 @@ def build_snapshot(orch) -> dict:
     market = orch.get("market_data") if orch else None
     strategies = orch.get("strategies") if orch else None
     regime = orch.get("regime") if orch else None
+    options_data = orch.get("options_data") if orch else None
 
     portfolio = _safe(lambda: execution.get_snapshot(), {}) if execution else {}
 
@@ -64,6 +65,7 @@ def build_snapshot(orch) -> dict:
             "regime": _safe(lambda: regime.current().label, "range/normal") if regime else "range/normal",
         },
         "sleeves": _safe(lambda: strategies.sleeve_stats(), []) if strategies else [],
+        "options": _safe(lambda: options_data.latest(), None) if options_data else None,
         "portfolio": portfolio,
         "decisions": decisions,
         "opinions": opinions,

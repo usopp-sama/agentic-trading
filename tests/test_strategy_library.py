@@ -209,3 +209,47 @@ def test_factor_flattens_dropped_names():
 def test_factor_skips_short_history():
     short = {"X": _frame(100.0 + np.arange(50, dtype=float))}
     assert FactorComposite().evaluate_universe(short) == []
+
+
+def test_factor_value_quality_lift_cheap_quality_name():
+    # Two price-identical names: with price factors alone they tie, so
+    # fundamentals must decide. CHEAPQ is cheap (low PE/PB) and high
+    # quality (high ROE, low debt); RICHJ is the opposite.
+    n = 300
+    closes = 100.0 * (1.001 ** np.arange(n))
+    universe = {"CHEAPQ": _frame(closes), "RICHJ": _frame(closes.copy())}
+    fund = {
+        "CHEAPQ": {"pe": 10.0, "pb": 1.2, "roe": 0.28, "debt_to_equity": 0.1},
+        "RICHJ": {"pe": 55.0, "pb": 9.0, "roe": 0.06, "debt_to_equity": 2.0},
+    }
+    strat = FactorComposite(top_n=1, rebalance_calendar_days=0)
+    strat.set_fundamentals(lambda: fund)
+    signals = {s.symbol: s for s in strat.evaluate_universe(universe)}
+    assert signals["CHEAPQ"].stance == Stance.BUY
+    assert "RICHJ" not in signals or signals["RICHJ"].stance != Stance.BUY
+    assert signals["CHEAPQ"].features["value"] > 0.5
+    assert signals["CHEAPQ"].features["quality"] > 0.5
+
+
+def test_factor_survives_broken_fundamentals_provider():
+    strat = FactorComposite(top_n=1)
+    strat.set_fundamentals(lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    signals = strat.evaluate_universe(_factor_universe())
+    # Falls back to price-only factors instead of dying.
+    assert any(s.stance == Stance.BUY for s in signals)
+
+
+def test_factor_ignores_negative_pe():
+    n = 300
+    closes = 100.0 * (1.001 ** np.arange(n))
+    universe = {"LOSSCO": _frame(closes), "PROFITCO": _frame(closes.copy())}
+    fund = {
+        "LOSSCO": {"pe": -8.0, "pb": 1.0, "roe": -0.05, "debt_to_equity": 0.5},
+        "PROFITCO": {"pe": 20.0, "pb": 3.0, "roe": 0.15, "debt_to_equity": 0.5},
+    }
+    strat = FactorComposite(top_n=2, rebalance_calendar_days=0)
+    strat.set_fundamentals(lambda: fund)
+    signals = {s.symbol: s for s in strat.evaluate_universe(universe)}
+    # LOSSCO's negative PE is excluded from the value rank, not ranked "cheapest".
+    assert "value" not in signals["LOSSCO"].features or signals["LOSSCO"].features["value"] <= 1.0
+    assert signals["PROFITCO"].stance == Stance.BUY

@@ -62,6 +62,17 @@ class Settings(BaseSettings):
     # --- Market data ("synthetic" | "yfinance" | "kite") ---
     data_source: str = "synthetic"
     bar_interval: str = "1d"
+    # Pause live-source polling outside NSE hours (synthetic is exempt).
+    respect_market_hours: bool = True
+
+    # --- Fundamentals ("synthetic" | "yfinance"; "auto" follows data_source) ---
+    fundamentals_source: str = "auto"
+    fundamentals_refresh_hours: int = 24
+
+    # --- Options chain (NIFTY IV monitor; "synthetic" | "nse"; "auto") ---
+    option_chain_source: str = "auto"
+    option_chain_symbol: str = "NIFTY"
+    option_chain_interval_s: int = 1800
 
     # --- Hard risk guardrails (apply in ALL live modes) ---
     max_position_pct: float = 0.10       # max 10% of capital in one name

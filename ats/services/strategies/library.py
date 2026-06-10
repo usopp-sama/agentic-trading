@@ -305,14 +305,18 @@ class PairsZScore(UniverseStrategy):
 class FactorComposite(UniverseStrategy):
     """Cross-sectional factor sleeve (roadmap Part 7.10).
 
-    Ranks the equity universe on a composite of two price-based factors —
-    12-1 momentum and low realized volatility (each as a percentile rank,
-    equally weighted) — holds the top ``top_n`` names, and rebalances
-    roughly quarterly. Names that drop out of the basket get a NEUTRAL
-    signal so their sleeve holding is flattened. This is the slow
-    compounding sleeve; value/quality factors join the composite when a
-    fundamentals pipeline lands (no ratio data is available in-process
-    yet).
+    Ranks the equity universe on an equally-weighted composite of
+    percentile-ranked factors: 12-1 **momentum** and **low realized
+    volatility** from prices, plus **value** (low P/E, low P/B) and
+    **quality** (high ROE, low debt/equity) when a fundamentals provider
+    is wired in (see ``set_fundamentals``; the FundamentalsService
+    injects itself via the StrategyService). Missing data degrades
+    gracefully: a factor a symbol lacks simply doesn't enter that
+    symbol's average — never treated as zero.
+
+    Holds the top ``top_n`` names, rebalances roughly quarterly, and
+    names that drop out of the basket get a NEUTRAL signal so their
+    sleeve holding is flattened.
 
     Indices and commodity/index ETFs are excluded — an equity factor
     model has no business ranking the Nifty against a silver ETF.
@@ -339,6 +343,12 @@ class FactorComposite(UniverseStrategy):
         self.min_bars = formation + skip + 1
         self._last_rebalance = None  # date of the last basket build
         self._basket: set[str] = set()
+        # Callable returning {symbol: {pe, pb, roe, debt_to_equity, ...}}.
+        self._fundamentals = None
+
+    def set_fundamentals(self, provider) -> None:
+        """Wire a fundamentals source; value/quality factors activate."""
+        self._fundamentals = provider
 
     def evaluate_universe(
         self, history: dict[str, pd.DataFrame]
@@ -368,22 +378,28 @@ class FactorComposite(UniverseStrategy):
         if not mom:
             return []
 
-        # Percentile ranks in [0, 1]: high momentum good, low vol good.
-        mom_rank = pd.Series(mom).rank(pct=True)
-        lowvol_rank = (-pd.Series(vol)).rank(pct=True)
-        composite = (0.5 * mom_rank + 0.5 * lowvol_rank).sort_values(ascending=False)
+        # Percentile ranks in [0, 1], higher = better on each factor.
+        factors = pd.DataFrame(index=sorted(mom))
+        factors["momentum"] = pd.Series(mom).rank(pct=True)
+        factors["low_vol"] = (-pd.Series(vol)).rank(pct=True)
+        for name, col in self._fundamental_ranks(list(factors.index)).items():
+            factors[name] = col
+        composite = factors.mean(axis=1, skipna=True).sort_values(ascending=False)
         top = set(composite.head(self.top_n).index)
 
         signals: list[SignalModel] = []
         for sym in sorted(top):
             score = float(composite[sym])
-            signals.append(
-                self._signal(
-                    sym, Stance.BUY, 0.3 + 0.5 * score,
-                    composite=round(score, 3), mom=round(mom[sym], 4),
-                    ann_vol=round(vol[sym], 4), rebalance=day.isoformat(),
-                )
-            )
+            feats = {
+                "composite": round(score, 3),
+                "mom": round(mom[sym], 4),
+                "ann_vol": round(vol[sym], 4),
+                "rebalance": day.isoformat(),
+            }
+            for name in ("value", "quality"):
+                if name in factors.columns and pd.notna(factors.at[sym, name]):
+                    feats[name] = round(float(factors.at[sym, name]), 3)
+            signals.append(self._signal(sym, Stance.BUY, 0.3 + 0.5 * score, **feats))
         for sym in sorted(self._basket - top):
             signals.append(
                 self._signal(sym, Stance.NEUTRAL, 0.0, rebalance=day.isoformat())
@@ -391,6 +407,38 @@ class FactorComposite(UniverseStrategy):
         self._basket = top
         self._last_rebalance = day
         return signals
+
+    def _fundamental_ranks(self, syms: list[str]) -> dict[str, pd.Series]:
+        """Value/quality percentile ranks for symbols with data, or {}."""
+        if self._fundamentals is None:
+            return {}
+        try:
+            fund = self._fundamentals() or {}
+        except Exception:  # noqa: BLE001 - factor sleeve must survive a bad provider
+            return {}
+
+        def _series(field: str, condition=lambda v: True) -> pd.Series:
+            vals = {
+                s: fund[s][field]
+                for s in syms
+                if s in fund and fund[s].get(field) is not None and condition(fund[s][field])
+            }
+            return pd.Series(vals, dtype=float)
+
+        out: dict[str, pd.Series] = {}
+        # Value: cheap on earnings and book (negative P/E means losses, skip).
+        pe_rank = (-_series("pe", lambda v: v > 0)).rank(pct=True)
+        pb_rank = (-_series("pb", lambda v: v > 0)).rank(pct=True)
+        value = pd.concat([pe_rank, pb_rank], axis=1).mean(axis=1, skipna=True)
+        if not value.empty:
+            out["value"] = value
+        # Quality: productive equity, conservative balance sheet.
+        roe_rank = _series("roe").rank(pct=True)
+        de_rank = (-_series("debt_to_equity", lambda v: v >= 0)).rank(pct=True)
+        quality = pd.concat([roe_rank, de_rank], axis=1).mean(axis=1, skipna=True)
+        if not quality.empty:
+            out["quality"] = quality
+        return out
 
 
 def default_strategies() -> list[Strategy]:

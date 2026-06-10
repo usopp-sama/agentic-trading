@@ -20,6 +20,8 @@ log = get_logger("ats.wiring")
 _SERVICES = [
     ("ats.services.market_data.service", "MarketDataService"),
     ("ats.services.regime.service", "RegimeService"),
+    ("ats.services.fundamentals.service", "FundamentalsService"),
+    ("ats.services.options_data.service", "OptionsDataService"),
     ("ats.services.scraper.service", "ScraperService"),
     ("ats.services.nlp.service", "NlpService"),
     ("ats.services.strategies.service", "StrategyService"),

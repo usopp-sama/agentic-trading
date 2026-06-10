@@ -17,6 +17,7 @@ from ats.core.db import session_scope
 from ats.core.events import EventBus, Topic
 from ats.core.logging import get_logger
 from ats.core.models import Instrument
+from ats.services.market_data.calendar import is_polling_window
 from ats.services.market_data.sources import build_data_source
 from ats.services.market_data.store import load_history, upsert_bars
 
@@ -36,6 +37,7 @@ class MarketDataService:
         self._history: dict[str, pd.DataFrame] = {}
         self._last_price: dict[str, float] = {}
         self._symbols: list[str] = []
+        self._closed_logged = False
 
     # --- lifecycle ---------------------------------------------------------
     async def start(self, ctx) -> None:
@@ -67,13 +69,30 @@ class MarketDataService:
 
     # --- polling -----------------------------------------------------------
     async def poll_all(self) -> None:
+        if self._market_closed():
+            return
         for symbol in self._symbols:
             try:
                 await self._poll_symbol(symbol)
             except Exception as exc:  # noqa: BLE001
                 log.warning("poll_failed", extra={"symbol": symbol, "error": str(exc)})
 
+    def _market_closed(self) -> bool:
+        """Gate LIVE sources to NSE hours; synthetic keeps flowing for dev."""
+        from ats.core.config import get_settings
+
+        settings = get_settings()
+        if settings.data_source == "synthetic" or not settings.respect_market_hours:
+            return False
+        if is_polling_window():
+            return False
+        if not self._closed_logged:
+            log.info("market_closed_polling_paused", extra={"source": settings.data_source})
+            self._closed_logged = True
+        return True
+
     async def _poll_symbol(self, symbol: str) -> None:
+        self._closed_logged = False
         df = self.source.poll(symbol)
         added = upsert_bars(symbol, df)
         self._history[symbol] = df

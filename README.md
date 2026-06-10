@@ -3,6 +3,14 @@
 A learning-oriented but production-minded toolkit for market analysis,
 built alongside the [Quant Finance Learning Roadmap](./quant_finance_learning_roadmap_31d331f8.plan.md).
 
+**Built for the Indian market.** The universe is NSE large caps +
+indices + commodity ETFs; the base currency is INR; the fee model
+charges brokerage, STT, exchange fees, stamp duty, and GST the Indian
+way; market-data polling respects the NSE calendar (09:15–15:30 IST,
+exchange holidays); fundamentals cover NSE symbols; the option-chain
+monitor reads NIFTY IV; and the broker integration path is Zerodha
+Kite, gated behind the real-money switch.
+
 It implements the early build phases of the roadmap's market-analysis tool:
 a data pipeline, technical + fundamental analysis, a screener, a
 look-ahead-safe backtester, and risk-based position sizing.
@@ -65,6 +73,15 @@ each tagged with a style the regime layer understands:
 | `sma_crossover` | Trend | 20/50 SMA crossover baseline. |
 | `mean_reversion` | Mean reversion | Bollinger %b band reversion. |
 | `volume_breakout` | Momentum | Price breakout confirmed by volume z-score. |
+
+## India-market data layer
+
+| Component | What it does |
+|---|---|
+| `ats.services.market_data.calendar` | NSE trading calendar: IST hours (09:15–15:30), 2026 holiday list, post-close grace window. Live-source polling pauses off-hours. |
+| `ats.services.fundamentals` | Ratios for NSE equities (P/E, P/B, ROE, D/E, margins) via pluggable providers: yfinance (`.NS`) live, deterministic synthetic offline. Feeds value/quality factors, the screener, and agents. |
+| `ats.services.market_data.option_chain` | NIFTY option chain via the nseindia.com API (cookie warm-up, browser headers, graceful failure) or a synthetic chain offline. |
+| `ats.services.options_data` | Polls the chain, computes ATM IV, put-call ratio, and the IV premium over 20-day realized vol — the vol-risk-premium monitor that the future defined-risk options sleeve (7.7) will trade on. |
 
 Four coordination layers keep multiple strategies from conflicting
 (roadmap Part 8): the **CIO** nets opposing views into one proposal per

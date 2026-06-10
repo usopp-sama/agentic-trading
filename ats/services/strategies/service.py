@@ -68,6 +68,12 @@ class StrategyService:
         self._md = ctx.orchestrator.get("market_data")
         self._regime = ctx.orchestrator.get("regime")
         self._status = self._load_status()
+        fundamentals = ctx.orchestrator.get("fundamentals")
+        if fundamentals is not None:
+            for strat in self._universe_strategies:
+                setter = getattr(strat, "set_fundamentals", None)
+                if setter is not None:
+                    setter(fundamentals.all_latest)
         ctx.bus.subscribe(Topic.BAR, self._on_bar)
 
     async def _on_bar(self, evt) -> None:

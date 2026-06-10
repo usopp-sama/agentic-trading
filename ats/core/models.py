@@ -184,6 +184,30 @@ class Strategy(Base):
     weight: Mapped[float] = mapped_column(Float, default=1.0)
 
 
+class Fundamental(Base):
+    """Latest fundamental ratios per instrument (Indian market, NSE symbols).
+
+    One row per (symbol, as_of) refresh. Ratios feed the value/quality
+    factors, the screener, and agent context. ``None`` means the source
+    did not report the field — consumers must treat missing as missing,
+    never as zero.
+    """
+
+    __tablename__ = "fundamentals"
+    __table_args__ = (UniqueConstraint("symbol", "as_of", name="uq_fundamental"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(64), index=True)
+    as_of: Mapped[date] = mapped_column(Date, index=True)
+    pe: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pb: Mapped[float | None] = mapped_column(Float, nullable=True)
+    roe: Mapped[float | None] = mapped_column(Float, nullable=True)
+    debt_to_equity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    profit_margin: Mapped[float | None] = mapped_column(Float, nullable=True)
+    dividend_yield: Mapped[float | None] = mapped_column(Float, nullable=True)
+    market_cap: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String(24), default="synthetic")
+
+
 class SleevePnl(Base):
     """Daily virtual P&L per strategy sleeve (attribution + decay detection).
 
