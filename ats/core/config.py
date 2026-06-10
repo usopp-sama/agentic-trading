@@ -59,8 +59,10 @@ class Settings(BaseSettings):
     base_currency: str = "INR"
     paper_starting_capital: float = 1_000_000.0  # Rs 10 lakh paper book
 
-    # --- Market data ("synthetic" | "yfinance" | "kite") ---
-    data_source: str = "synthetic"
+    # --- Market data ("yfinance" | "synthetic" | "kite") ---
+    # Defaults to real (delayed) NSE data via yfinance; falls back to synthetic
+    # per-symbol only if a live fetch fails, so it still boots offline.
+    data_source: str = "yfinance"
     bar_interval: str = "1d"
 
     # --- Hard risk guardrails (apply in ALL live modes) ---

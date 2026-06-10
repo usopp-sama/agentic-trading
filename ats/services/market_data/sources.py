@@ -10,12 +10,16 @@ swaps via ``ATS_DATA_SOURCE``.
 from __future__ import annotations
 
 import hashlib
+import time
 from typing import Protocol
 
 import numpy as np
 import pandas as pd
 
 from quant.data.fetch import synthetic_prices
+from ats.core.logging import get_logger
+
+log = get_logger("ats.market_data")
 
 
 class DataSource(Protocol):
@@ -91,12 +95,77 @@ class KiteDataSource:
         )
 
 
+class ResilientDataSource:
+    """Caches a live source per symbol and falls back gracefully.
+
+    Live feeds (yfinance) are rate-limited and occasionally fail, and we don't
+    want to refetch six months of history every 60s poll. So we cache each
+    symbol's frame and only refresh after ``refresh_s``. If a live fetch fails
+    we serve the last good cache, and if we've never had real data for a symbol
+    we fall back to synthetic so the system still boots offline. ``is_live``
+    reports whether the latest data for a symbol came from the live feed.
+    """
+
+    def __init__(self, primary: DataSource, fallback: DataSource, refresh_s: int = 300) -> None:
+        self._primary = primary
+        self._fallback = fallback
+        self._refresh_s = refresh_s
+        self._cache: dict[str, pd.DataFrame] = {}
+        self._fetched_at: dict[str, float] = {}
+        self._live: dict[str, bool] = {}
+
+    def poll(self, symbol: str) -> pd.DataFrame:
+        now = time.time()
+        fresh = (now - self._fetched_at.get(symbol, 0.0)) < self._refresh_s
+        if symbol in self._cache and fresh:
+            return self._cache[symbol]
+        try:
+            df = self._primary.poll(symbol)
+            if df is None or df.empty:
+                raise ValueError("empty frame from live source")
+            self._cache[symbol] = df
+            self._fetched_at[symbol] = now
+            self._live[symbol] = True
+            return df
+        except Exception as exc:  # noqa: BLE001 - live feeds fail; degrade, don't crash
+            if symbol in self._cache:
+                return self._cache[symbol]
+            log.warning("live_fetch_fallback_synthetic", extra={"symbol": symbol, "error": str(exc)})
+            df = self._fallback.poll(symbol)
+            self._cache[symbol] = df
+            self._fetched_at[symbol] = now
+            self._live[symbol] = False
+            return df
+
+    def prefetch(self, symbols: list[str]) -> None:
+        """Warm the cache for many symbols in one batched download."""
+        try:
+            from quant.data.fetch import fetch_prices_batch
+
+            frames = fetch_prices_batch(symbols, period="6mo")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("batch_prefetch_failed", extra={"error": str(exc)})
+            return
+        now = time.time()
+        for sym, df in frames.items():
+            if df is not None and not df.empty:
+                self._cache[sym] = df
+                self._fetched_at[sym] = now
+                self._live[sym] = True
+        log.info("batch_prefetch", extra={"requested": len(symbols), "live": len(frames)})
+
+    def is_live(self, symbol: str) -> bool:
+        return self._live.get(symbol, False)
+
+
 def build_data_source() -> DataSource:
     from ats.core.config import get_settings
 
-    source = get_settings().data_source
+    settings = get_settings()
+    source = settings.data_source
     if source == "yfinance":
-        return YFinanceDataSource()
+        refresh = max(120, settings.market_scan_interval_s)
+        return ResilientDataSource(YFinanceDataSource(), SyntheticDataSource(), refresh_s=refresh)
     if source == "kite":
         return KiteDataSource()
     return SyntheticDataSource()
