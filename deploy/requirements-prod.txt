@@ -1,0 +1,8 @@
+# Production-only drivers, installed into the image when INSTALL_EXTRAS=true.
+# The app degrades gracefully without these (SQLite + in-memory bus), so they
+# are kept out of the lean default image.
+redis>=5.0
+psycopg[binary]>=3.2
+# kiteconnect is intentionally NOT installed by default. Add it only on the
+# host that will trade real money, alongside the closed real-money gate review.
+# kiteconnect>=5.0

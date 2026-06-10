@@ -27,6 +27,9 @@ htmlcov/
 
 # Runtime / generated data
 var/
+backups/
+*.db
+*.sqlite
 
 # Environment & secrets
 .env

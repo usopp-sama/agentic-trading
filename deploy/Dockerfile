@@ -10,8 +10,12 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # Install deps first for layer caching. Use deterministic install.
-COPY requirements.txt ./
-RUN pip install --upgrade pip && pip install -r requirements.txt
+# Set INSTALL_EXTRAS=true to add Postgres/Redis drivers for the scaled stack.
+ARG INSTALL_EXTRAS=false
+COPY requirements.txt deploy/requirements-prod.txt ./
+RUN pip install --upgrade pip \
+    && pip install -r requirements.txt \
+    && if [ "$INSTALL_EXTRAS" = "true" ]; then pip install -r requirements-prod.txt; fi
 
 # Copy application code.
 COPY quant ./quant

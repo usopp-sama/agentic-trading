@@ -8,6 +8,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      args:
+        INSTALL_EXTRAS: "true"   # build Postgres/Redis drivers into the image
     restart: unless-stopped
     env_file:
       - ../.env
@@ -15,7 +17,8 @@ services:
       ATS_DB_URL: postgresql+psycopg://ats:${POSTGRES_PASSWORD:-changeme}@postgres:5432/ats
       ATS_EVENT_BUS: redis
       ATS_REDIS_URL: redis://redis:6379/0
-      ATS_VECTOR_STORE: chroma
+      # In-memory vector store today; switch to a service-backed store once wired.
+      ATS_VECTOR_STORE: memory
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,16 +73,7 @@ services:
       timeout: 5s
       retries: 5
 
-  qdrant:
-    image: qdrant/qdrant:latest
-    restart: unless-stopped
-    volumes:
-      - qdrant_data:/qdrant/storage
-    security_opt:
-      - no-new-privileges:true
-
 volumes:
   app_data:
   pg_data:
   redis_data:
-  qdrant_data:
