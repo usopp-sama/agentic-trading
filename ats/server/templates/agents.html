@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Agents{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="card span4"><h2>Macro Tilt</h2><div id="macro" class="kpi">—</div>
+    <div class="muted">Aggregate market-wide lean from macro SMEs (− bearish, + bullish).</div></div>
+  <div class="card span4"><h2>Roster</h2><div id="rosterCount" class="kpi">—</div><div class="muted">expert agents loaded</div></div>
+  <div class="card span4"><h2>Live Opinions</h2><div id="opCount" class="kpi">0</div><div class="muted">streamed this session</div></div>
+
+  <div class="card span12">
+    <h2>SME Roster</h2><p class="sub">Every expert agent, its domain family, base weight, and earned vote weight.</p>
+    <div class="scroll"><table id="roster"><thead>
+      <tr><th>SME</th><th>Family</th><th>Scope</th><th class="r">Base wt</th><th class="r">Vote wt</th><th>Status</th></tr>
+    </thead><tbody></tbody></table></div>
+  </div>
+
+  <div class="card span6">
+    <h2>Opinion Stream</h2><p class="sub">What experts are saying right now — live as agents run.</p>
+    <div class="scroll" id="opinionStream"></div>
+  </div>
+  <div class="card span6">
+    <h2>Leaderboard</h2><p class="sub">Who has earned influence through their track record.</p>
+    <div class="scroll"><table id="leaderboard"><thead>
+      <tr><th>SME</th><th class="r">n</th><th class="r">Hit</th><th class="r">Brier</th><th class="r">Vote</th><th>Status</th></tr>
+    </thead><tbody></tbody></table></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+const $=(id)=>document.getElementById(id), E=ATS.esc;
+const cls=(s)=>s&&(s.includes('buy')||s.includes('bull'))?'buy':(s&&(s.includes('sell')||s.includes('bear'))?'sell':'neu');
+const lbVote={}; let opCount=0; const stream=[];
+
+function loadStatic(){
+  ATS.fetchJSON('/api/agents').then(d=>{
+    $('macro').textContent=(d.macro_tilt>=0?'+':'')+ATS.fmt(d.macro_tilt);
+    $('rosterCount').textContent=(d.roster||[]).length;
+    (d.leaderboard||[]).forEach(l=>lbVote[l.sme]=l.vote_weight);
+    $('roster').querySelector('tbody').innerHTML=(d.roster||[]).map(p=>`<tr>
+      <td>${E(p.name)}</td><td>${E(p.family)}</td><td class="muted">${E(p.scope)}</td>
+      <td class="r">${ATS.fmt(p.weight)}</td><td class="r">${ATS.fmt(lbVote[p.id]??'–')}</td>
+      <td>${E(p.status||'')}</td></tr>`).join('')||'<tr><td colspan=6 class=muted>none</td></tr>';
+    $('leaderboard').querySelector('tbody').innerHTML=(d.leaderboard||[]).map(l=>`<tr>
+      <td>${E(l.sme)}</td><td class="r">${l.n}</td><td class="r">${ATS.fmt(l.hit_rate)}</td>
+      <td class="r">${ATS.fmt(l.brier)}</td><td class="r">${ATS.fmt(l.vote_weight)}</td><td>${E(l.status||'')}</td></tr>`).join('')
+      ||'<tr><td colspan=6 class=muted>no track records yet — run training</td></tr>';
+    // seed opinion stream from persisted history
+    (d.opinions||[]).slice(0,30).forEach(o=>stream.push(o));
+    drawStream();
+  }).catch(()=>{});
+}
+function drawStream(){
+  $('opinionStream').innerHTML=stream.slice(0,40).map(o=>`<div class="news-item">
+    <b>${E(o.sme)}</b> on <span class="tick">${E(o.symbol)}</span>
+    <span class="chip ${cls(o.stance)==='buy'?'pos':cls(o.stance)==='sell'?'neg':'neu'}">${E(o.stance)} ${ATS.fmt(o.conviction)}</span>
+    <div class="meta">${E((o.rationale||'').slice(0,140))}</div></div>`).join('')
+    ||'<div class="muted">No opinions yet — agents speak when signals or news arrive.</div>';
+}
+
+ATS.on('event',(m)=>{
+  if(m.topic==='agent.opinion'){
+    const p=m.payload||{}; opCount++; $('opCount').textContent=opCount;
+    stream.unshift({sme:p.sme,symbol:p.symbol,stance:p.stance,conviction:p.conviction,rationale:p.rationale});
+    stream.splice(40); drawStream();
+  }
+});
+loadStatic();
+</script>
+{% endblock %}

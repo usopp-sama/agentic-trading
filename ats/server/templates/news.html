@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}News{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="card span4"><h2>Ingested</h2><div id="newsCount" class="kpi">0</div><div class="muted">headlines this session</div></div>
+  <div class="card span4"><h2>Scored</h2><div id="sentCount" class="kpi">0</div><div class="muted">sentiment evaluations</div></div>
+  <div class="card span4"><h2>Watchlist Hits</h2><div id="hitCount" class="kpi">0</div><div class="muted">stories mapped to your names</div></div>
+
+  <div class="card span7">
+    <h2>Live Feed</h2><p class="sub">Headlines as they arrive. Items mapped to a watchlist name are highlighted.</p>
+    <div class="scroll" id="feed" style="max-height:520px"></div>
+  </div>
+  <div class="card span5">
+    <h2>Sentiment Board</h2><p class="sub">Watchlist names ranked by recent news lean.</p>
+    <div class="scroll" id="sentBoard" style="max-height:520px"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+const $=(id)=>document.getElementById(id), E=ATS.esc;
+const sc=(l)=>l==='positive'?'pos':(l==='negative'?'neg':'neu');
+let newsN=0,sentN=0,hitN=0;
+const watch=new Set();
+
+function chip(s){ return s?`<span class="chip ${sc(s.label)}">${s.label} ${s.score>0?'+':''}${s.score}</span>`:''; }
+function item(n,isWatch){
+  const title=n.url?`<a href="${E(n.url)}" target="_blank" rel="noopener noreferrer">${E(n.title)}</a>`:E(n.title);
+  const ticks=((n.watch&&n.watch.length?n.watch:n.tickers)||[]).slice(0,5).map(t=>`<span class="tick">${E(t)}</span>`).join('');
+  const bg=isWatch?'style="background:rgba(77,159,255,.06);border-radius:8px;padding-left:8px"':'';
+  return `<div class="news-item" ${bg}>${title}${chip(n.sentiment)}
+    <div class="meta">${E(n.source||'')} · ${ticks||'<span class=muted>no ticker</span>'}</div></div>`;
+}
+
+function loadStatic(){
+  ATS.fetchJSON('/api/dashboard').then(d=>{
+    (d.watchlist_news||[]).forEach(n=>(n.watch||n.tickers||[]).forEach(t=>watch.add(t)));
+    const all=(d.watchlist_news||[]).concat(d.news||[]);
+    const seen=new Set(); const uniq=all.filter(n=>{const k=n.title;if(seen.has(k))return false;seen.add(k);return true;});
+    $('feed').innerHTML=uniq.map(n=>item(n,(n.watch&&n.watch.length))).join('')||'<div class="muted">No news yet.</div>';
+    newsN=uniq.length; $('newsCount').textContent=newsN;
+    hitN=(d.watchlist_news||[]).length; $('hitCount').textContent=hitN;
+    $('sentBoard').innerHTML=(d.sentiment_board||[]).map(s=>{
+      const pct=Math.min(100,Math.abs(s.mean_score)*100);
+      const color=s.label==='positive'?'var(--green)':s.label==='negative'?'var(--red)':'var(--muted)';
+      return `<div class="news-item"><b>${E(s.symbol)}</b> ${chip({label:s.label,score:s.mean_score})}
+        <span class="muted" style="float:right">${s.count} stories</span>
+        <div class="bar"><span style="width:${pct}%;background:${color}"></span></div></div>`;
+    }).join('')||'<div class="muted">No watchlist news scored yet.</div>';
+  }).catch(()=>{});
+}
+
+ATS.on('event',(m)=>{
+  if(m.topic==='news.item'){
+    const p=m.payload||{}; newsN++; $('newsCount').textContent=newsN;
+    const isWatch=(p.tickers||[]).some(t=>watch.has(t));
+    if(isWatch){ hitN++; $('hitCount').textContent=hitN; }
+    const el=document.createElement('div'); el.innerHTML=item(p,isWatch);
+    $('feed').prepend(el.firstChild);
+    while($('feed').children.length>120) $('feed').lastChild.remove();
+  } else if(m.topic==='news.sentiment'){
+    sentN++; $('sentCount').textContent=sentN;
+  }
+});
+loadStatic();
+</script>
+{% endblock %}

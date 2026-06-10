@@ -14,8 +14,9 @@ from ats.services.dashboard.snapshot import build_snapshot
 log = get_logger("ats.dashboard")
 
 _FORWARD_TOPICS = [
-    Topic.FILL, Topic.DECISION, Topic.OPINION, Topic.PROPOSAL,
-    Topic.VOLUME_SPIKE, Topic.APPROVAL_REQUEST, Topic.ALERT,
+    Topic.VOLUME_SPIKE, Topic.NEWS, Topic.SENTIMENT, Topic.SIGNAL,
+    Topic.OPINION, Topic.PROPOSAL, Topic.DECISION, Topic.ORDER,
+    Topic.FILL, Topic.APPROVAL_REQUEST, Topic.RULE_CHANGE, Topic.ALERT,
 ]
 
 
@@ -36,7 +37,10 @@ class DashboardService:
         )
 
     async def _forward(self, evt) -> None:
-        await self._hub.broadcast({"type": "event", "topic": evt.topic, "payload": evt.payload})
+        ts = evt.ts.isoformat() if hasattr(evt, "ts") and evt.ts else None
+        await self._hub.broadcast(
+            {"type": "event", "topic": evt.topic, "payload": evt.payload, "ts": ts}
+        )
 
     async def broadcast_snapshot(self) -> None:
         await self._hub.broadcast({"type": "snapshot", "data": build_snapshot(self._orch)})
