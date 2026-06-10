@@ -132,6 +132,10 @@ class SleeveTracker:
         sharpe = self.rolling_sharpe(book.strategy)
         return sharpe is not None and sharpe < self._decay_sharpe
 
+    def returns_by_sleeve(self) -> dict[str, list[float]]:
+        """Daily return history per sleeve (input to capital allocation)."""
+        return {sid: list(b.daily_returns) for sid, b in self._books.items()}
+
     def rolling_sharpe(self, strategy: str) -> float | None:
         book = self._books.get(strategy)
         if book is None or len(book.daily_returns) < 20:

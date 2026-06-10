@@ -45,6 +45,10 @@ class UniverseStrategy(ABC):
     ) -> list[SignalModel]:
         """Return signals across the universe given per-symbol OHLCV."""
 
+    def symbols(self) -> list[str]:
+        """Symbols this strategy needs; empty means the whole watchlist."""
+        return []
+
     def _signal(
         self, symbol: str, stance: Stance, conviction: float, **features
     ) -> SignalModel:

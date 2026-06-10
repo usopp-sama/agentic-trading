@@ -302,6 +302,97 @@ class PairsZScore(UniverseStrategy):
         return signals
 
 
+class FactorComposite(UniverseStrategy):
+    """Cross-sectional factor sleeve (roadmap Part 7.10).
+
+    Ranks the equity universe on a composite of two price-based factors —
+    12-1 momentum and low realized volatility (each as a percentile rank,
+    equally weighted) — holds the top ``top_n`` names, and rebalances
+    roughly quarterly. Names that drop out of the basket get a NEUTRAL
+    signal so their sleeve holding is flattened. This is the slow
+    compounding sleeve; value/quality factors join the composite when a
+    fundamentals pipeline lands (no ratio data is available in-process
+    yet).
+
+    Indices and commodity/index ETFs are excluded — an equity factor
+    model has no business ranking the Nifty against a silver ETF.
+    """
+
+    id = "factor_composite"
+    style = "factor"  # not in the regime tilt matrix: the slow sleeve is never dampened
+
+    DEFAULT_EXCLUDE = frozenset({"SILVERBEES.NS", "GOLDBEES.NS", "NIFTYBEES.NS"})
+
+    def __init__(
+        self,
+        top_n: int = 10,
+        formation: int = 252,
+        skip: int = 21,
+        vol_window: int = 60,
+        rebalance_calendar_days: int = 90,
+        exclude: frozenset[str] | None = None,
+    ) -> None:
+        self.top_n, self.formation, self.skip = top_n, formation, skip
+        self.vol_window = vol_window
+        self.rebalance_calendar_days = rebalance_calendar_days
+        self.exclude = exclude if exclude is not None else self.DEFAULT_EXCLUDE
+        self.min_bars = formation + skip + 1
+        self._last_rebalance = None  # date of the last basket build
+        self._basket: set[str] = set()
+
+    def evaluate_universe(
+        self, history: dict[str, pd.DataFrame]
+    ) -> list[SignalModel]:
+        if not history:
+            return []
+        day = max(df.index[-1] for df in history.values()).date()
+        if (
+            self._last_rebalance is not None
+            and (day - self._last_rebalance).days < self.rebalance_calendar_days
+        ):
+            return []
+
+        mom: dict[str, float] = {}
+        vol: dict[str, float] = {}
+        for sym, df in history.items():
+            if sym.startswith("^") or sym in self.exclude or len(df) < self.min_bars:
+                continue
+            close = df["close"]
+            recent = float(close.iloc[-(self.skip + 1)])
+            past = float(close.iloc[-(self.formation + self.skip + 1)])
+            ann_vol = indicators.annualized_volatility(close.tail(self.vol_window))
+            if past <= 0 or not np.isfinite(ann_vol) or ann_vol <= 0:
+                continue
+            mom[sym] = recent / past - 1.0
+            vol[sym] = ann_vol
+        if not mom:
+            return []
+
+        # Percentile ranks in [0, 1]: high momentum good, low vol good.
+        mom_rank = pd.Series(mom).rank(pct=True)
+        lowvol_rank = (-pd.Series(vol)).rank(pct=True)
+        composite = (0.5 * mom_rank + 0.5 * lowvol_rank).sort_values(ascending=False)
+        top = set(composite.head(self.top_n).index)
+
+        signals: list[SignalModel] = []
+        for sym in sorted(top):
+            score = float(composite[sym])
+            signals.append(
+                self._signal(
+                    sym, Stance.BUY, 0.3 + 0.5 * score,
+                    composite=round(score, 3), mom=round(mom[sym], 4),
+                    ann_vol=round(vol[sym], 4), rebalance=day.isoformat(),
+                )
+            )
+        for sym in sorted(self._basket - top):
+            signals.append(
+                self._signal(sym, Stance.NEUTRAL, 0.0, rebalance=day.isoformat())
+            )
+        self._basket = top
+        self._last_rebalance = day
+        return signals
+
+
 def default_strategies() -> list[Strategy]:
     return [
         SmaCrossover(),
@@ -314,4 +405,4 @@ def default_strategies() -> list[Strategy]:
 
 
 def default_universe_strategies() -> list[UniverseStrategy]:
-    return [PairsZScore()]
+    return [PairsZScore(), FactorComposite()]

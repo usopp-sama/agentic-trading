@@ -30,6 +30,10 @@ from ats.core.events import EventBus, Topic
 from ats.core.logging import get_logger
 from ats.core.models import Signal, SleevePnl, Strategy as StrategyRow
 from ats.core.schemas import SignalModel, Stance
+from ats.services.strategies.allocation import (
+    conviction_multipliers,
+    inverse_vol_weights,
+)
 from ats.services.strategies.library import (
     default_strategies,
     default_universe_strategies,
@@ -58,6 +62,9 @@ class StrategyService:
             decay_sharpe=settings.sleeve_decay_sharpe,
             decay_min_days=settings.sleeve_decay_min_days,
         )
+        # Inverse-vol capital allocation across sleeves (recomputed daily).
+        self._alloc_weights: dict[str, float] = {}
+        self._alloc_mult: dict[str, float] = {}
 
     async def start(self, ctx) -> None:
         self._bus = ctx.bus
@@ -131,6 +138,20 @@ class StrategyService:
                     }
                 )
 
+        # Sleeve capital allocation: dampen the voice of sleeves that earn
+        # a below-top inverse-vol weight (the top sleeve keeps 1.0).
+        alloc = self._alloc_mult.get(sig.strategy, 1.0)
+        if alloc < 1.0 and sig.conviction > 0:
+            sig = sig.model_copy(
+                update={
+                    "conviction": round(sig.conviction * alloc, 4),
+                    "features": {
+                        **sig.features,
+                        "sleeve_weight": self._alloc_weights.get(sig.strategy),
+                    },
+                }
+            )
+
         # Long-only sleeves: bullish stances hold the name, others are flat.
         self._sleeves.update_holding(sig.strategy, sig.symbol, sig.stance.direction)
 
@@ -148,7 +169,10 @@ class StrategyService:
         close = float(df["close"].iloc[-1])
         last_ts = df.index[-1]
         day = last_ts.date() if isinstance(last_ts, (pd.Timestamp, datetime)) else date.today()
-        for fin in self._sleeves.mark_bar(symbol, close, day):
+        finalized = self._sleeves.mark_bar(symbol, close, day)
+        if finalized:
+            self._reallocate()
+        for fin in finalized:
             self._persist_sleeve_day(fin)
             if fin.decayed and self._bus is not None:
                 sharpe = self._sleeves.rolling_sharpe(fin.strategy)
@@ -168,6 +192,17 @@ class StrategyService:
                         ),
                     },
                 )
+
+    def _reallocate(self) -> None:
+        """Recompute inverse-vol sleeve weights on each completed day."""
+        self._alloc_weights = inverse_vol_weights(self._sleeves.returns_by_sleeve())
+        self._alloc_mult = conviction_multipliers(self._alloc_weights)
+        with session_scope() as s:
+            for sid, weight in self._alloc_weights.items():
+                row = s.get(StrategyRow, sid)
+                if row is not None:
+                    row.weight = self._alloc_mult.get(sid, 1.0)
+                    row.allocation_pct = weight
 
     @staticmethod
     def _persist_sleeve_day(fin: FinalizedDay) -> None:
@@ -205,7 +240,10 @@ class StrategyService:
         return {sym: list(d.values()) for sym, d in self._latest.items()}
 
     def sleeve_stats(self) -> list[dict]:
-        return self._sleeves.stats()
+        stats = self._sleeves.stats()
+        for s in stats:
+            s["alloc_weight"] = self._alloc_weights.get(s["strategy"])
+        return stats
 
     @staticmethod
     def _load_status() -> dict[str, str]:

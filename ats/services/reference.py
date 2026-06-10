@@ -86,6 +86,7 @@ STRATEGIES: list[tuple[str, str, str, str]] = [
     ("rsi2_reversion", "RSI(2) Pullback in Uptrend", "mean_reversion", "paper"),
     ("ts_momentum", "12-1 Time-Series Momentum", "momentum", "paper"),
     ("pairs_zscore", "Pairs Z-Score (stat arb)", "stat_arb", "paper"),
+    ("factor_composite", "Momentum + Low-Vol Factor Composite", "factor", "paper"),
 ]
 
 

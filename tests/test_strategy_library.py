@@ -13,6 +13,7 @@ import pandas as pd
 from ats.core.schemas import Stance
 from ats.services.strategies.library import (
     DonchianTrend,
+    FactorComposite,
     PairsZScore,
     Rsi2MeanReversion,
     TimeSeriesMomentum,
@@ -148,3 +149,63 @@ def test_pairs_skips_missing_leg():
 def test_pairs_declares_needed_symbols():
     strat = PairsZScore(pairs=[("A", "B"), ("B", "C")])
     assert strat.symbols() == ["A", "B", "C"]
+
+
+# --- factor composite ------------------------------------------------------------
+def _factor_universe() -> dict[str, pd.DataFrame]:
+    rng = np.random.default_rng(23)
+    n = 300
+    # WINNER: strong steady climb (high momentum, low vol).
+    winner = 100.0 * (1.002 ** np.arange(n))
+    # CHOPPY: same total climb but violently volatile.
+    choppy = 100.0 * (1.002 ** np.arange(n)) * np.exp(
+        np.cumsum(rng.normal(0.0, 0.04, n)) - np.cumsum(rng.normal(0.0, 0.04, n)).mean()
+    )
+    # LAGGARD: flat.
+    laggard = np.full(n, 100.0) + rng.normal(0.0, 0.2, n)
+    return {
+        "WIN": _frame(winner),
+        "CHOP": _frame(np.abs(choppy) + 1.0),
+        "LAG": _frame(laggard),
+        "^NSEI": _frame(winner),          # index must be ignored
+        "SILVERBEES.NS": _frame(winner),  # ETF must be ignored
+    }
+
+
+def test_factor_picks_steady_winner_and_excludes_non_equity():
+    strat = FactorComposite(top_n=1)
+    signals = strat.evaluate_universe(_factor_universe())
+    buys = [s for s in signals if s.stance == Stance.BUY]
+    assert [s.symbol for s in buys] == ["WIN"]
+    assert all(s.symbol not in {"^NSEI", "SILVERBEES.NS"} for s in signals)
+
+
+def test_factor_holds_between_rebalances():
+    strat = FactorComposite(top_n=1, rebalance_calendar_days=90)
+    universe = _factor_universe()
+    assert strat.evaluate_universe(universe) != []
+    # Same day again: inside the rebalance window -> no churn.
+    assert strat.evaluate_universe(universe) == []
+
+
+def test_factor_flattens_dropped_names():
+    strat = FactorComposite(top_n=1, rebalance_calendar_days=0)
+    universe = _factor_universe()
+    strat.evaluate_universe(universe)  # basket = {WIN}
+    # Crash the winner violently (noisy, so its vol rank tanks too);
+    # the steady laggard becomes the relative winner.
+    rng = np.random.default_rng(99)
+    crashed = universe["WIN"]["close"].to_numpy().copy()
+    crashed[-100:] = (
+        crashed[-100]
+        * (0.97 ** np.arange(100))
+        * np.exp(rng.normal(0.0, 0.03, 100))
+    )
+    universe["WIN"] = _frame(crashed)
+    signals = {s.symbol: s for s in strat.evaluate_universe(universe)}
+    assert signals["WIN"].stance == Stance.NEUTRAL  # flattened on drop
+
+
+def test_factor_skips_short_history():
+    short = {"X": _frame(100.0 + np.arange(50, dtype=float))}
+    assert FactorComposite().evaluate_universe(short) == []

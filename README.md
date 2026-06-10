@@ -60,17 +60,22 @@ each tagged with a style the regime layer understands:
 | `ts_momentum` | Time-series momentum (7.1/7.2) | Sign of 12-month return skipping the latest month; vol-scaled conviction. |
 | `rsi2_reversion` | Short-term mean reversion (7.3) | RSI(2) < 10 above the 200-SMA buys the pullback; > 70 exits. |
 | `pairs_zscore` | Pairs / stat arb (7.4) | Z-score of log price ratio; long the cheap leg past 2σ (long-only book). |
+| `factor_composite` | Factor investing (7.10) | Top-N basket by momentum + low-vol percentile ranks; ~quarterly rebalance. |
 | `sma_crossover` | Trend | 20/50 SMA crossover baseline. |
 | `mean_reversion` | Mean reversion | Bollinger %b band reversion. |
 | `volume_breakout` | Momentum | Price breakout confirmed by volume z-score. |
 
-Three coordination layers keep multiple strategies from conflicting
+Four coordination layers keep multiple strategies from conflicting
 (roadmap Part 8): the **CIO** nets opposing views into one proposal per
 symbol; **virtual sleeves** (`ats.services.strategies.sleeves`) mark each
 strategy's own book to market daily for attribution and flag decaying
-sleeves (rolling-Sharpe alert); and the **regime service**
+sleeves (rolling-Sharpe alert); the **regime service**
 (`ats.services.regime`) dampens conviction of styles that mismatch the
-current market regime and halves new-exposure sizing in crisis volatility.
+current market regime and halves new-exposure sizing in crisis volatility;
+and the **capital allocator** (`ats.services.strategies.allocation`)
+recomputes bounded inverse-volatility weights across sleeves daily so each
+contributes roughly equal risk, applied as dampen-only conviction
+multipliers (the top sleeve keeps 1.0).
 
 ## Design notes
 
@@ -92,10 +97,12 @@ pytest
 
 This repo covers **Phase 1–3** of Part 5 in the roadmap (data pipeline,
 analysis engine, signals + sizing) plus the first hands-on project, and
-now the first slice of the multi-strategy build: the proven-strategy
-library (Part 7: trend, momentum, mean reversion, pairs), regime
-detection (Part 7.12), sleeve P&L attribution + decay detection
-(Parts 8.2/8.5), and regime-aware risk scaling. Still ahead — the
-factor sleeve, defined-risk vol premium (after the options module),
-risk-parity capital allocation across sleeves, FinBERT sentiment, and
+now the first slices of the multi-strategy build: the proven-strategy
+library (Part 7: trend, momentum, mean reversion, pairs, factor
+composite), regime detection (Part 7.12), sleeve P&L attribution +
+decay detection (Parts 8.2/8.5), regime-aware risk scaling, and
+inverse-vol capital allocation across sleeves (Part 8.4, stage 2).
+Still ahead — value/quality factors once a fundamentals pipeline
+lands, defined-risk vol premium (after the options module),
+correlation-aware risk parity (8.4 stages 3-4), FinBERT sentiment, and
 ML-based signals with walk-forward validation.
