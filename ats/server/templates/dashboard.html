@@ -50,6 +50,7 @@
   <span id="modePill" class="pill blue">MODE …</span>
   <span id="killPill" class="pill green">LIVE</span>
   <span id="moneyPill" class="pill amber">PAPER</span>
+  <span id="regimePill" class="pill blue">REGIME …</span>
   <span class="muted" id="meta"></span>
   <span class="spacer"></span>
   <select id="modeSelect" title="Trading mode">
@@ -64,6 +65,10 @@
   <div class="card span3"><h2>Unrealized PnL</h2><div id="upnl" class="kpi">—</div></div>
   <div class="card span3"><h2>Realized PnL</h2><div id="rpnl" class="kpi">—</div></div>
   <div class="card span3"><h2>Macro Tilt / Watchlist</h2><div id="macro" class="kpi small">—</div><div class="muted" id="wl"></div></div>
+
+  <div class="card span12"><h2>Strategy Sleeves</h2><div class="scroll"><table id="sleeves"><thead>
+    <tr><th>Strategy</th><th class="r">Equity</th><th class="r">Sharpe</th><th class="r">Max DD</th><th class="r">Weight</th><th class="r">Days</th><th class="r">Holdings</th></tr>
+    </thead><tbody></tbody></table></div></div>
 
   <div class="card span6"><h2>Pending Approvals</h2><div class="scroll"><table id="approvals"><thead>
     <tr><th>Decision</th><th>Requested</th><th class="r">Action</th></tr></thead><tbody></tbody></table></div></div>
@@ -93,6 +98,7 @@
 <script>
 const $ = (id)=>document.getElementById(id);
 const fmt = (n)=> (n==null?'—':Number(n).toLocaleString('en-IN',{maximumFractionDigits:2}));
+const pct = (n)=> (n==null?'—':(Number(n)*100).toFixed(2)+'%');
 const cls = (s)=> s&&s.includes('buy')?'buy':(s&&s.includes('sell')?'sell':'neu');
 
 function render(d){
@@ -102,6 +108,9 @@ function render(d){
   $('killPill').className = 'pill '+(st.kill_switch?'red':'green');
   $('moneyPill').textContent = st.real_money_active?'REAL MONEY':'PAPER';
   $('moneyPill').className = 'pill '+(st.real_money_active?'red':'amber');
+  const reg=(st.regime||'').toString(), trend=reg.split('/')[0]||'', vol=reg.split('/')[1]||'';
+  $('regimePill').textContent = 'REGIME '+(reg?reg.toUpperCase():'?');
+  $('regimePill').className = 'pill '+(vol==='crisis'?'red':trend==='up'?'green':trend==='down'?'red':'blue');
   $('meta').textContent = `data:${st.data_source} · llm:${st.llm_provider} · audit:${st.audit_chain_ok?'ok':'BROKEN'}`;
   $('equity').textContent = '₹'+fmt(pf.equity);
   $('cash').textContent = 'cash ₹'+fmt(pf.cash)+' · holdings ₹'+fmt(pf.holdings_value);
@@ -112,6 +121,11 @@ function render(d){
   $('macro').textContent = (st.macro_tilt>=0?'+':'')+fmt(st.macro_tilt);
   $('wl').textContent = (st.watchlist||0)+' instruments';
 
+  tbody('sleeves',(d.sleeves||[]).map(s=>`<tr><td>${s.strategy}</td>
+    <td class="r ${(s.equity==null||s.equity>=1)?'buy':'sell'}">${s.equity==null?'—':Number(s.equity).toFixed(4)+'×'}</td>
+    <td class="r">${fmt(s.sharpe)}</td><td class="r">${pct(s.max_drawdown)}</td>
+    <td class="r">${pct(s.alloc_weight)}</td><td class="r">${s.days==null?'—':s.days}</td>
+    <td class="r muted" title="${(s.holdings||[]).join(', ')}">${(s.holdings||[]).length}</td></tr>`));
   tbody('positions',(pf.positions||[]).map(p=>`<tr><td>${p.symbol}</td><td class="r">${p.qty}</td>
     <td class="r">${fmt(p.avg_price)}</td><td class="r">${fmt(p.last_price)}</td>
     <td class="r">${fmt(p.market_value)}</td><td class="r ${(p.unrealized_pnl||0)>=0?'buy':'sell'}">${fmt(p.unrealized_pnl)}</td></tr>`));

@@ -30,10 +30,7 @@ from ats.core.events import EventBus, Topic
 from ats.core.logging import get_logger
 from ats.core.models import Signal, SleevePnl, Strategy as StrategyRow
 from ats.core.schemas import SignalModel, Stance
-from ats.services.strategies.allocation import (
-    conviction_multipliers,
-    inverse_vol_weights,
-)
+from ats.services.strategies.allocation import allocate, conviction_multipliers
 from ats.services.strategies.library import (
     default_strategies,
     default_universe_strategies,
@@ -194,8 +191,12 @@ class StrategyService:
                 )
 
     def _reallocate(self) -> None:
-        """Recompute inverse-vol sleeve weights on each completed day."""
-        self._alloc_weights = inverse_vol_weights(self._sleeves.returns_by_sleeve())
+        """Recompute sleeve capital weights on each completed day."""
+        returns = self._sleeves.returns_by_sleeve()
+        sharpes = {sid: self._sleeves.rolling_sharpe(sid) for sid in returns}
+        self._alloc_weights = allocate(
+            returns, sharpes, method=get_settings().sleeve_allocation_method
+        )
         self._alloc_mult = conviction_multipliers(self._alloc_weights)
         with session_scope() as s:
             for sid, weight in self._alloc_weights.items():

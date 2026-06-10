@@ -47,6 +47,7 @@ python -m quant.projects.silverbees_nav --offline  # synthetic data
 | `quant.analysis.screener` | Declarative, rule-based screener with ranking. |
 | `quant.backtest` | Vectorized, look-ahead-safe signal backtester + SMA-crossover baseline. |
 | `quant.risk` | Kelly criterion (discrete + continuous), fractional Kelly, capped position sizing. |
+| `quant.options` | Black-Scholes-Merton pricing + Greeks, implied vol (bisection), CRR binomial tree (American exercise). |
 | `quant.projects` | End-to-end mini-projects (SILVERBEES NAV analysis). |
 
 ## Strategy library (roadmap Part 7)
@@ -73,9 +74,10 @@ sleeves (rolling-Sharpe alert); the **regime service**
 (`ats.services.regime`) dampens conviction of styles that mismatch the
 current market regime and halves new-exposure sizing in crisis volatility;
 and the **capital allocator** (`ats.services.strategies.allocation`)
-recomputes bounded inverse-volatility weights across sleeves daily so each
-contributes roughly equal risk, applied as dampen-only conviction
-multipliers (the top sleeve keeps 1.0).
+recomputes bounded risk-parity weights across sleeves daily — staging
+automatically from inverse-vol to correlation-aware equal risk
+contribution with a bounded performance tilt as sleeve history deepens —
+applied as dampen-only conviction multipliers (the top sleeve keeps 1.0).
 
 ## Design notes
 
@@ -102,7 +104,8 @@ library (Part 7: trend, momentum, mean reversion, pairs, factor
 composite), regime detection (Part 7.12), sleeve P&L attribution +
 decay detection (Parts 8.2/8.5), regime-aware risk scaling, and
 inverse-vol capital allocation across sleeves (Part 8.4, stage 2).
+The options pricing/Greeks calculator (Phase 5) is in `quant.options`.
 Still ahead — value/quality factors once a fundamentals pipeline
-lands, defined-risk vol premium (after the options module),
-correlation-aware risk parity (8.4 stages 3-4), FinBERT sentiment, and
+lands, the defined-risk vol-premium sleeve (needs an options-chain
+data source on top of `quant.options`), FinBERT sentiment, and
 ML-based signals with walk-forward validation.

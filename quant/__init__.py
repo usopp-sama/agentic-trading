@@ -7,9 +7,10 @@ and risk-based position sizing.
 Modules
 -------
 - ``quant.data``      : fetching market data and persisting it locally
-- ``quant.analysis``  : technical indicators, valuation, screening
+- ``quant.analysis``  : technical indicators, valuation, screening, regime
 - ``quant.backtest``  : a simple vectorized signal backtester
 - ``quant.risk``      : position sizing (Kelly, fixed-fractional)
+- ``quant.options``   : Black-Scholes pricing, Greeks, implied vol, CRR tree
 - ``quant.projects``  : end-to-end mini projects (e.g. ETF NAV analysis)
 """
 

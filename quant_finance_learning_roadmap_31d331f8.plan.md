@@ -33,11 +33,11 @@ todos:
     content: "Define the Strategy interface contract (data in -> desired position + conviction out, no broker access) so every strategy plugs into the same engine. Done: per-symbol Strategy + UniverseStrategy bases in ats/services/strategies/base.py."
     status: completed
   - id: strategy-library
-    content: "Implement proven strategies in priority order: ETF NAV arbitrage, trend following (Donchian/ATR), short-term mean reversion (RSI-2), pairs trading (cointegration), factor sleeve, defined-risk vol premium. Done: Donchian 55/20, RSI(2) with 200-SMA filter, 12-1 momentum, pairs z-score, factor composite (momentum + low-vol; value/quality await a fundamentals pipeline). Remaining: vol premium (after options module)."
+    content: "Implement proven strategies in priority order: ETF NAV arbitrage, trend following (Donchian/ATR), short-term mean reversion (RSI-2), pairs trading (cointegration), factor sleeve, defined-risk vol premium. Done: Donchian 55/20, RSI(2) with 200-SMA filter, 12-1 momentum, pairs z-score, factor composite (momentum + low-vol; value/quality await a fundamentals pipeline). Remaining: vol premium — quant/options.py (BS pricing, Greeks, IV, CRR) is built; the sleeve needs an options-chain data source."
     status: in_progress
   - id: multi-strat-engine
-    content: "Build multi-strategy orchestration: virtual capital sleeves, position netting engine, per-instrument exposure caps, risk-parity capital allocator, single OMS owning the broker connection. Done: sleeves with virtual P&L attribution + decay alerts, CIO netting, exposure caps, single execution path, bounded inverse-vol allocation across sleeves (stage 2). Remaining: correlation-aware risk parity (stages 3-4)."
-    status: in_progress
+    content: "Build multi-strategy orchestration: virtual capital sleeves, position netting engine, per-instrument exposure caps, risk-parity capital allocator, single OMS owning the broker connection. Done: sleeves with virtual P&L attribution + decay alerts, CIO netting, exposure caps, single execution path, and the full allocation ladder (inverse-vol -> correlation-aware ERC -> bounded performance tilt, auto-staged by history depth)."
+    status: completed
   - id: risk-layer
     content: "Build layered risk controls: per-trade 1% risk, per-strategy drawdown auto-disable, portfolio kill switch, fractional Kelly sizing, broker-level hard stops, trade-only API keys."
     status: pending

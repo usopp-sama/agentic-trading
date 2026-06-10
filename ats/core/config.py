@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     # --- Strategy sleeves: virtual P&L attribution + decay detection ---
     sleeve_decay_sharpe: float = 0.0     # alert when rolling Sharpe drops below
     sleeve_decay_min_days: int = 60      # ...after at least this many marked days
+    # Capital allocation across sleeves: auto | inverse_vol | erc | erc_tilt.
+    # auto = inverse-vol until 2+ sleeves have ~2 months of history, then
+    # correlation-aware risk parity with a bounded performance tilt.
+    sleeve_allocation_method: str = "auto"
 
     # --- External data API keys (free-tier v1 stack; optional) ---
     marketaux_api_key: str = Field(default="", repr=False)

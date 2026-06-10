@@ -1,20 +1,31 @@
 """Capital allocation across strategy sleeves (roadmap Part 8.4).
 
-Stage 2 of the plan's allocation ladder: **inverse-volatility weights**
-(naive risk parity). Each sleeve is weighted by 1/sigma of its daily
-virtual returns so every sleeve contributes roughly equal risk — a
-volatile sleeve automatically gets less capital influence. Weights are
-bounded (default 5%–35%) so no sleeve is starved or dominant, exactly
-as the roadmap prescribes for the later performance-tilted stage.
+The plan's allocation ladder, all stages implemented here:
 
-Sleeves without enough history are treated as average-risk (they get
-the equal-weight share) rather than excluded — a brand-new strategy
+- **Stage 2 — inverse-volatility** (naive risk parity): weight each
+  sleeve by 1/sigma of its daily virtual returns.
+- **Stage 3 — equal risk contribution (ERC)**: full covariance-aware
+  risk parity. The property stage 2 misses: two highly *correlated*
+  sleeves are really one bet — ERC sizes them down together and hands
+  the diversifying sleeve more capital.
+- **Stage 4 — bounded performance tilt**: scale weights toward sleeves
+  with better rolling Sharpe, bounded so performance-chasing can never
+  concentrate the book.
+
+``allocate`` is the entry point and stages automatically: ERC needs a
+trustworthy covariance estimate, so until every-pair joint history is
+long enough it falls back to inverse-vol (and the tilt only ever
+applies on top of ERC).
+
+Sleeves without enough history are treated as average-risk (median-vol
+prior, zero correlation) rather than excluded — a brand-new strategy
 should start at par, not at zero and not over-allocated.
 
-Applied downstream as **dampen-only conviction multipliers** (the
-highest-weighted sleeve keeps multiplier 1.0), consistent with how
-regime tilts work: the allocation layer can shrink a sleeve's voice,
-never amplify a signal beyond what the strategy itself claimed.
+Weights are bounded (default 5%–35%) and applied downstream as
+**dampen-only conviction multipliers** (the highest-weighted sleeve
+keeps multiplier 1.0), consistent with how regime tilts work: the
+allocation layer can shrink a sleeve's voice, never amplify a signal
+beyond what the strategy itself claimed.
 
 Pure functions; the StrategyService owns when to recompute.
 """
@@ -23,6 +34,8 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+
+import numpy as np
 
 _MIN_VOL = 1e-6
 
@@ -68,6 +81,149 @@ def inverse_vol_weights(
     total = sum(inv.values())
     weights = {sid: w / total for sid, w in inv.items()}
     return _clamp_normalize(weights, floor_eff, cap_eff)
+
+
+def erc_weights(
+    returns_by_sleeve: dict[str, Sequence[float]],
+    floor: float = 0.05,
+    cap: float = 0.35,
+    min_days: int = 20,
+) -> dict[str, float]:
+    """Stage-3 equal-risk-contribution weights, bounded.
+
+    The covariance matrix is built from the overlapping tail of each
+    pair's history. Sleeves with fewer than ``min_days`` observations
+    get a neutral prior: the median variance of informed sleeves and
+    zero correlation with everyone (an unknown strategy is assumed
+    average-risk and diversifying, which keeps it near the equal-weight
+    share until evidence arrives).
+    """
+    ids = sorted(returns_by_sleeve)
+    n = len(ids)
+    if n == 0:
+        return {}
+    equal = 1.0 / n
+    if n == 1:
+        return {ids[0]: 1.0}
+    floor_eff = min(floor, equal)
+    cap_eff = min(1.0, max(cap, 1.25 / n))
+
+    informed = [
+        sid for sid in ids if len(returns_by_sleeve[sid]) >= min_days
+    ]
+    if len(informed) < 2:
+        return inverse_vol_weights(returns_by_sleeve, floor, cap, min_days)
+
+    variances = {
+        sid: float(np.var(np.asarray(returns_by_sleeve[sid], dtype=float), ddof=1))
+        for sid in informed
+    }
+    neutral_var = max(float(np.median(list(variances.values()))), _MIN_VOL**2)
+
+    cov = np.full((n, n), 0.0)
+    for i, a in enumerate(ids):
+        cov[i, i] = max(variances.get(a, neutral_var), _MIN_VOL**2)
+        for j in range(i + 1, n):
+            b = ids[j]
+            if a in variances and b in variances:
+                ra = np.asarray(returns_by_sleeve[a], dtype=float)
+                rb = np.asarray(returns_by_sleeve[b], dtype=float)
+                k = min(len(ra), len(rb))
+                if k >= min_days:
+                    c = float(np.cov(ra[-k:], rb[-k:], ddof=1)[0, 1])
+                    cov[i, j] = cov[j, i] = c
+            # else: zero covariance prior for uninformed pairs.
+
+    raw = _solve_erc(cov)
+    weights = {sid: float(raw[i]) for i, sid in enumerate(ids)}
+    return _clamp_normalize(weights, floor_eff, cap_eff)
+
+
+def _solve_erc(cov: np.ndarray, iters: int = 500, tol: float = 1e-10) -> np.ndarray:
+    """Fixed-point iteration for equal risk contributions.
+
+    Update w_i <- w_i * (mean(RC) / RC_i)^0.5, renormalize; converges
+    for positive-definite covariances at the handful-of-sleeves scale
+    this is used at. Falls back to inverse-vol proportions if risk
+    contributions degenerate.
+    """
+    n = cov.shape[0]
+    vols = np.sqrt(np.clip(np.diag(cov), _MIN_VOL**2, None))
+    w = (1.0 / vols) / np.sum(1.0 / vols)
+    for _ in range(iters):
+        marginal = cov @ w
+        rc = w * marginal
+        if np.any(rc <= 0):
+            return w
+        target = float(np.mean(rc))
+        update = np.sqrt(target / rc)
+        new = w * update
+        new = new / np.sum(new)
+        if float(np.max(np.abs(new - w))) < tol:
+            return new
+        w = new
+    return w
+
+
+def performance_tilt(
+    weights: dict[str, float],
+    sharpe_by_sleeve: dict[str, float | None],
+    strength: float = 0.25,
+    floor: float = 0.05,
+    cap: float = 0.35,
+) -> dict[str, float]:
+    """Stage-4 bounded tilt toward sleeves with better rolling Sharpe.
+
+    Each weight is scaled by ``1 + strength * tanh(sharpe / 2)`` — a
+    Sharpe of +2 earns about a +19% scaling at the default strength, a
+    deeply negative one the mirror image, and an unknown Sharpe is
+    neutral. Bounds are re-applied after renormalizing, so the tilt can
+    lean the book but never concentrate it.
+    """
+    if not weights:
+        return {}
+    n = len(weights)
+    floor_eff = min(floor, 1.0 / n)
+    cap_eff = min(1.0, max(cap, 1.25 / n))
+    tilted = {}
+    for sid, w in weights.items():
+        sharpe = sharpe_by_sleeve.get(sid)
+        scale = 1.0 + strength * math.tanh(sharpe / 2.0) if sharpe is not None else 1.0
+        tilted[sid] = w * scale
+    total = sum(tilted.values())
+    if total <= 0:
+        return dict(weights)
+    tilted = {sid: w / total for sid, w in tilted.items()}
+    return _clamp_normalize(tilted, floor_eff, cap_eff)
+
+
+def allocate(
+    returns_by_sleeve: dict[str, Sequence[float]],
+    sharpe_by_sleeve: dict[str, float | None] | None = None,
+    method: str = "auto",
+    floor: float = 0.05,
+    cap: float = 0.35,
+    min_days: int = 20,
+    erc_min_days: int = 40,
+) -> dict[str, float]:
+    """Allocation entry point with automatic staging.
+
+    ``auto`` uses ERC + performance tilt once at least two sleeves have
+    ``erc_min_days`` of history (a covariance needs more data than a
+    vol estimate to be trustworthy), inverse-vol before that. Explicit
+    methods: ``inverse_vol`` | ``erc`` | ``erc_tilt``.
+    """
+    if method == "inverse_vol":
+        return inverse_vol_weights(returns_by_sleeve, floor, cap, min_days)
+    seasoned = sum(
+        1 for rets in returns_by_sleeve.values() if len(rets) >= erc_min_days
+    )
+    if method == "auto" and seasoned < 2:
+        return inverse_vol_weights(returns_by_sleeve, floor, cap, min_days)
+    weights = erc_weights(returns_by_sleeve, floor, cap, min_days)
+    if method == "erc":
+        return weights
+    return performance_tilt(weights, sharpe_by_sleeve or {}, floor=floor, cap=cap)
 
 
 def conviction_multipliers(weights: dict[str, float]) -> dict[str, float]:
