@@ -82,6 +82,16 @@ class RiskService:
             max_position_pct=settings.max_position_pct,
         )
 
+        # Regime crisis cut: in crisis volatility, scale down any exposure
+        # INCREASE (reductions always pass). Conservative-only by design.
+        regime_applied: list[str] = []
+        regime_svc = self._orch.get("regime") if self._orch else None
+        if regime_svc is not None and regime_svc.is_crisis() and desired > current_qty:
+            desired = current_qty + int(
+                (desired - current_qty) * settings.regime_crisis_scale
+            )
+            regime_applied.append("regime:crisis_scale")
+
         # Rate limit: reject if too many orders in the last 60s.
         if self._rate_limited(settings.max_orders_per_min):
             self._record_decision(proposal, "HOLD", 0, ["rate_limit"], status="blocked")
@@ -104,6 +114,8 @@ class RiskService:
 
         if result.kill and not state.is_killed():
             state.engage_kill_switch(actor="risk_manager", reason="daily_loss_limit breached")
+
+        result.applied.extend(regime_applied)
 
         # Adaptive rulebook: an additional, conservative-only clamp/veto layer.
         rule_applied = self._apply_adaptive_rules(symbol, result)

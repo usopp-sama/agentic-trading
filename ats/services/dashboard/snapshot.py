@@ -28,6 +28,8 @@ def build_snapshot(orch) -> dict:
     learning = orch.get("learning") if orch else None
     rules = orch.get("rules") if orch else None
     market = orch.get("market_data") if orch else None
+    strategies = orch.get("strategies") if orch else None
+    regime = orch.get("regime") if orch else None
 
     portfolio = _safe(lambda: execution.get_snapshot(), {}) if execution else {}
 
@@ -59,7 +61,9 @@ def build_snapshot(orch) -> dict:
             "macro_tilt": round(agents.macro_tilt, 4) if agents else 0.0,
             "watchlist": len(market.watchlist()) if market else 0,
             "audit_chain_ok": _safe(state.verify_audit_chain, True),
+            "regime": _safe(lambda: regime.current().label, "range/normal") if regime else "range/normal",
         },
+        "sleeves": _safe(lambda: strategies.sleeve_stats(), []) if strategies else [],
         "portfolio": portfolio,
         "decisions": decisions,
         "opinions": opinions,

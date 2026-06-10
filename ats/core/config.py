@@ -71,6 +71,14 @@ class Settings(BaseSettings):
     max_orders_per_min: int = 30
     max_trade_value: float = 50_000.0    # absolute per-order cap
 
+    # --- Regime detection (roadmap Part 7.12) ---
+    regime_reference_symbol: str = "^NSEI"  # index the regime is read from
+    regime_crisis_scale: float = 0.5     # cut new-exposure sizing in crisis vol
+
+    # --- Strategy sleeves: virtual P&L attribution + decay detection ---
+    sleeve_decay_sharpe: float = 0.0     # alert when rolling Sharpe drops below
+    sleeve_decay_min_days: int = 60      # ...after at least this many marked days
+
     # --- External data API keys (free-tier v1 stack; optional) ---
     marketaux_api_key: str = Field(default="", repr=False)
     alphavantage_api_key: str = Field(default="", repr=False)

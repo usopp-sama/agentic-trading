@@ -62,3 +62,41 @@ def test_invalid_window_raises(close):
         indicators.sma(close, 0)
     with pytest.raises(ValueError):
         indicators.ema(close, -3)
+
+
+@pytest.fixture
+def ohlcv() -> pd.DataFrame:
+    return synthetic_prices(n=120, seed=7)
+
+
+def test_atr_constant_range_converges_to_range():
+    n = 60
+    close = pd.Series([100.0] * n)
+    df = pd.DataFrame(
+        {"high": close + 1.0, "low": close - 1.0, "close": close}
+    )
+    result = indicators.atr(df, 14).dropna()
+    # No gaps and a constant 2.0 true range -> ATR is exactly 2.0.
+    assert result.iloc[-1] == pytest.approx(2.0)
+
+
+def test_atr_positive_and_warmup(ohlcv):
+    result = indicators.atr(ohlcv, 14)
+    assert result.iloc[:13].isna().all()
+    assert (result.dropna() > 0).all()
+
+
+def test_donchian_excludes_current_bar():
+    rising = pd.Series(np.arange(1.0, 61.0))
+    df = pd.DataFrame({"high": rising, "low": rising - 0.5, "close": rising})
+    ch = indicators.donchian(df, 20).dropna()
+    aligned = df.loc[ch.index]
+    # In a strictly rising series every close is a breakout of the
+    # PRIOR 20-bar high; with an unshifted channel this would be equality.
+    assert (aligned["close"] > ch["upper"]).all()
+
+
+def test_donchian_bands_ordered(ohlcv):
+    ch = indicators.donchian(ohlcv, 20).dropna()
+    assert (ch["upper"] >= ch["mid"]).all()
+    assert (ch["mid"] >= ch["lower"]).all()

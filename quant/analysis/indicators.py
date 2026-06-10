@@ -100,6 +100,39 @@ def annualized_volatility(prices: pd.Series, periods_per_year: int = 252) -> flo
     return float(log_ret.std(ddof=1) * np.sqrt(periods_per_year))
 
 
+def atr(df: pd.DataFrame, window: int = 14) -> pd.Series:
+    """Average True Range using Wilder's smoothing.
+
+    Expects a DataFrame with ``high``, ``low`` and ``close`` columns.
+    True range handles gaps by including the previous close.
+    """
+    _validate_window(window)
+    prev_close = df["close"].shift(1)
+    tr = pd.concat(
+        [
+            df["high"] - df["low"],
+            (df["high"] - prev_close).abs(),
+            (df["low"] - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    return tr.ewm(alpha=1.0 / window, adjust=False, min_periods=window).mean()
+
+
+def donchian(df: pd.DataFrame, window: int = 20) -> pd.DataFrame:
+    """Donchian channel: rolling extremes of the *prior* ``window`` bars.
+
+    Returns a DataFrame with columns ``upper``, ``lower`` and ``mid``. The
+    bands exclude the current bar (shifted by one) so "close above upper"
+    is a genuine breakout of the previous N bars, not a self-comparison.
+    """
+    _validate_window(window)
+    upper = df["high"].rolling(window=window, min_periods=window).max().shift(1)
+    lower = df["low"].rolling(window=window, min_periods=window).min().shift(1)
+    mid = (upper + lower) / 2.0
+    return pd.DataFrame({"upper": upper, "lower": lower, "mid": mid})
+
+
 def _validate_window(window: int) -> None:
     if not isinstance(window, (int, np.integer)) or window < 1:
         raise ValueError(f"window must be a positive integer, got {window!r}")

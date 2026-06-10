@@ -82,6 +82,10 @@ STRATEGIES: list[tuple[str, str, str, str]] = [
     ("sma_crossover", "SMA 20/50 Crossover", "trend", "paper"),
     ("mean_reversion", "Bollinger Mean Reversion", "mean_reversion", "paper"),
     ("volume_breakout", "Volume Breakout", "momentum", "shadow"),
+    ("donchian_trend", "Donchian 55/20 Trend Following", "trend", "paper"),
+    ("rsi2_reversion", "RSI(2) Pullback in Uptrend", "mean_reversion", "paper"),
+    ("ts_momentum", "12-1 Time-Series Momentum", "momentum", "paper"),
+    ("pairs_zscore", "Pairs Z-Score (stat arb)", "stat_arb", "paper"),
 ]
 
 

@@ -184,6 +184,25 @@ class Strategy(Base):
     weight: Mapped[float] = mapped_column(Float, default=1.0)
 
 
+class SleevePnl(Base):
+    """Daily virtual P&L per strategy sleeve (attribution + decay detection).
+
+    Tracks what each strategy WOULD have earned trading its own signals
+    in an equal-weight virtual book, independent of what the blended real
+    book did. This is how per-strategy performance is attributed and how
+    decaying strategies are caught (roadmap Parts 8.2/8.5).
+    """
+
+    __tablename__ = "sleeve_pnl"
+    __table_args__ = (UniqueConstraint("strategy", "day", name="uq_sleeve_pnl"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    strategy: Mapped[str] = mapped_column(String(64), index=True)
+    day: Mapped[date] = mapped_column(Date, index=True)
+    ret: Mapped[float] = mapped_column(Float, default=0.0)     # daily return
+    equity: Mapped[float] = mapped_column(Float, default=1.0)  # cumulative growth of 1.0
+    holdings: Mapped[int] = mapped_column(Integer, default=0)  # names held at close
+
+
 class SmeTrackRecord(Base):
     __tablename__ = "sme_track_record"
     sme: Mapped[str] = mapped_column(String(64), primary_key=True)

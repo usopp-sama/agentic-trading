@@ -29,7 +29,7 @@ def _seed_for(symbol: str) -> int:
 class SyntheticDataSource:
     """Deterministic GBM history that grows by one bar per poll."""
 
-    def __init__(self, history: int = 180) -> None:
+    def __init__(self, history: int = 300) -> None:
         self._history = history
         self._frames: dict[str, pd.DataFrame] = {}
         self._rng: dict[str, np.random.Generator] = {}
@@ -72,7 +72,8 @@ class SyntheticDataSource:
 class YFinanceDataSource:
     """Live history from yfinance (Indian symbols use the .NS suffix)."""
 
-    def __init__(self, period: str = "6mo") -> None:
+    # 2y of dailies: the 200-SMA filter and 12-1 momentum need ~275 bars.
+    def __init__(self, period: str = "2y") -> None:
         self._period = period
 
     def poll(self, symbol: str) -> pd.DataFrame:

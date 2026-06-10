@@ -30,14 +30,14 @@ todos:
     content: Study ML for finance (Lopez de Prado book), risk management, behavioral finance. Build ML-based signal generation with walk-forward validation.
     status: pending
   - id: strategy-interface
-    content: "Define the Strategy interface contract (data in -> desired position + conviction out, no broker access) so every strategy plugs into the same engine."
-    status: pending
+    content: "Define the Strategy interface contract (data in -> desired position + conviction out, no broker access) so every strategy plugs into the same engine. Done: per-symbol Strategy + UniverseStrategy bases in ats/services/strategies/base.py."
+    status: completed
   - id: strategy-library
-    content: "Implement proven strategies in priority order: ETF NAV arbitrage, trend following (Donchian/ATR), short-term mean reversion (RSI-2), pairs trading (cointegration), factor sleeve, defined-risk vol premium."
-    status: pending
+    content: "Implement proven strategies in priority order: ETF NAV arbitrage, trend following (Donchian/ATR), short-term mean reversion (RSI-2), pairs trading (cointegration), factor sleeve, defined-risk vol premium. Done: Donchian 55/20, RSI(2) with 200-SMA filter, 12-1 momentum, pairs z-score. Remaining: factor sleeve, vol premium."
+    status: in_progress
   - id: multi-strat-engine
-    content: "Build multi-strategy orchestration: virtual capital sleeves, position netting engine, per-instrument exposure caps, risk-parity capital allocator, single OMS owning the broker connection."
-    status: pending
+    content: "Build multi-strategy orchestration: virtual capital sleeves, position netting engine, per-instrument exposure caps, risk-parity capital allocator, single OMS owning the broker connection. Done: sleeves with virtual P&L attribution + decay alerts, CIO netting, exposure caps, single execution path. Remaining: risk-parity allocation across sleeves."
+    status: in_progress
   - id: risk-layer
     content: "Build layered risk controls: per-trade 1% risk, per-strategy drawdown auto-disable, portfolio kill switch, fractional Kelly sizing, broker-level hard stops, trade-only API keys."
     status: pending
@@ -45,8 +45,8 @@ todos:
     content: "Run every strategy through 3+ months of paper trading with production-identical code before any real money; then stage capital up the autonomy ladder."
     status: pending
   - id: regime-detector
-    content: "Build regime detection (200-day MA filter, realized vol bands, later HMM) to route capital between trend, mean-reversion, and defensive postures."
-    status: pending
+    content: "Build regime detection (200-day MA filter, realized vol bands, later HMM) to route capital between trend, mean-reversion, and defensive postures. Done: quant/analysis/regime.py + RegimeService with conviction tilts and crisis exposure scaling; HMM upgrade later."
+    status: completed
 isProject: false
 ---
 

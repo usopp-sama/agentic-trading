@@ -29,6 +29,7 @@ class Topic:
     TICK = "market.tick"
     BAR = "market.bar"
     VOLUME_SPIKE = "market.volume_spike"
+    REGIME = "market.regime"
     NEWS = "news.item"
     SENTIMENT = "news.sentiment"
     SIGNAL = "strategy.signal"

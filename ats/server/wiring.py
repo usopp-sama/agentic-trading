@@ -19,6 +19,7 @@ log = get_logger("ats.wiring")
 # the event bus and scheduler.
 _SERVICES = [
     ("ats.services.market_data.service", "MarketDataService"),
+    ("ats.services.regime.service", "RegimeService"),
     ("ats.services.scraper.service", "ScraperService"),
     ("ats.services.nlp.service", "NlpService"),
     ("ats.services.strategies.service", "StrategyService"),
