@@ -1,0 +1,124 @@
+"""Deterministic context assembly.
+
+Turns raw grounded data (from the read-only tools) into normalized directional
+signals in [-1, 1] plus an evidence bundle. Determinism matters: the same
+inputs always produce the same context, which makes opinions cacheable and
+reproducible. Personas declare which signals they consume.
+"""
+
+from __future__ import annotations
+
+import math
+
+from ats.services.agents import tools
+from ats.services.agents.tools import Providers
+
+
+def _clip(x: float, lo: float = -1.0, hi: float = 1.0) -> float:
+    return max(lo, min(hi, x))
+
+
+def _sign(x: float) -> float:
+    return 1.0 if x > 0 else -1.0 if x < 0 else 0.0
+
+
+class ContextAssembler:
+    def __init__(self, providers: Providers) -> None:
+        self.p = providers
+
+    def assemble(self, persona: dict, symbol: str) -> dict:
+        needed = set(persona.get("inputs", []))
+        tech = tools.get_technical(self.p, symbol)
+        vol = tools.get_volume(self.p, symbol) if {"volume_thrust"} & needed else {}
+        sent = tools.get_sentiment(self.p, symbol) if {"sentiment", "news_flow"} & needed else {}
+        news = tools.get_news(self.p, symbol, k=3) if {"sentiment", "news_flow"} & needed else []
+        profile = tools.get_instrument_profile(self.p, symbol) if "profile_fit" in needed else {}
+
+        signals: dict[str, float] = {}
+        for name in needed:
+            val = self._signal(name, symbol, tech, vol, sent, profile)
+            if val is not None:
+                signals[name] = round(val, 4)
+
+        evidence = {
+            "technical": tech,
+            "volume": vol,
+            "sentiment": sent,
+            "news": [n["text"][:120] for n in news],
+            "profile": {k: profile.get(k) for k in ("sector", "themes") if k in profile},
+        }
+        evidence_count = sum(1 for v in (tech, vol, sent, news, profile) if v)
+
+        return {
+            "symbol": symbol,
+            "persona_id": persona.get("id"),
+            "signals": signals,
+            "evidence": evidence,
+            "evidence_count": evidence_count,
+            "risks": self._risks(tech, sent),
+            "news": evidence["news"],
+        }
+
+    def _signal(self, name, symbol, tech, vol, sent, profile) -> float | None:
+        if name == "momentum" and tech:
+            return _clip(math.tanh(tech.get("sma_gap", 0.0) * 12))
+        if name == "trend_strength" and tech:
+            return _clip((tech.get("rsi", 50) - 50) / 30)
+        if name == "mean_reversion" and tech:
+            return _clip(-(tech.get("pct_b", 0.5) - 0.5) * 2)
+        if name == "sentiment" and sent:
+            return _clip(sent.get("mean_score", 0.0))
+        if name == "news_flow" and sent:
+            # magnitude scaled by how many articles corroborate.
+            n = min(sent.get("count", 0), 5) / 5.0
+            return _clip(sent.get("mean_score", 0.0) * (0.5 + 0.5 * n))
+        if name == "volume_thrust" and vol:
+            return _clip(math.tanh(vol.get("vol_z", 0.0) / 3) * _sign(vol.get("ret1", 0.0)))
+        if name == "valuation" and tech:
+            return self._valuation_signal(symbol, tech)
+        if name == "macro_regime":
+            return self._macro_signal()
+        if name == "profile_fit":
+            return _clip(float(profile.get("thematic_fit", 0.0))) if profile else 0.0
+        return None
+
+    def _valuation_signal(self, symbol: str, tech: dict) -> float | None:
+        # Stub fundamental proxy: price vs 60-day mean (undervalued -> buy).
+        if not self.p.market_data:
+            return None
+        df = self.p.market_data.get_history(symbol)
+        if df is None or len(df) < 60:
+            return None
+        mean60 = float(df["close"].tail(60).mean())
+        price = float(df["close"].iloc[-1])
+        if price <= 0:
+            return None
+        return _clip((mean60 / price - 1.0) * 4)
+
+    def _macro_signal(self) -> float | None:
+        if not self.p.market_data:
+            return None
+        df = self.p.market_data.get_history("^NSEI")
+        if df is None or len(df) < 50:
+            return None
+        from quant.analysis import indicators
+
+        gap = (
+            float(indicators.sma(df["close"], 20).iloc[-1])
+            - float(indicators.sma(df["close"], 50).iloc[-1])
+        ) / float(indicators.sma(df["close"], 50).iloc[-1])
+        macro_sent = 0.0
+        if self.p.nlp:
+            macro_sent = self.p.nlp.recent_sentiment("^NSEI").get("mean_score", 0.0)
+        return _clip(math.tanh(gap * 10) * 0.7 + macro_sent * 0.3)
+
+    @staticmethod
+    def _risks(tech: dict, sent: dict) -> list[str]:
+        risks = []
+        if tech.get("rsi", 50) > 75:
+            risks.append("overbought (RSI>75)")
+        if tech.get("rsi", 50) < 25:
+            risks.append("oversold; possible falling knife")
+        if sent.get("label") == "negative":
+            risks.append("negative news flow")
+        return risks or ["standard market risk"]

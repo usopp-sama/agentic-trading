@@ -1,0 +1,31 @@
+# Analytics library (quant/)
+yfinance>=1.4.0
+pandas>=3.0.0
+numpy>=2.4.0
+scipy>=1.17.0
+matplotlib>=3.10.0
+
+# Server (ats/)
+fastapi>=0.136.0
+uvicorn[standard]>=0.49.0
+sqlalchemy>=2.0.0
+pydantic>=2.13.0
+pydantic-settings>=2.14.0
+httpx>=0.28.0
+apscheduler>=3.11.0
+jinja2>=3.1.0
+python-multipart>=0.0.32
+PyYAML>=6.0
+vaderSentiment>=3.3.2
+feedparser>=6.0.0
+
+# Dev/test
+pytest>=9.0.0
+
+# --- Optional (enable in production; code degrades gracefully without them) ---
+# redis>=5.0            # Redis Streams event bus + cache
+# psycopg[binary]>=3.2  # Postgres / TimescaleDB driver
+# chromadb>=0.5         # vector store for news + instrument-profile RAG
+# transformers>=4.44    # FinBERT sentiment
+# sentence-transformers # embeddings for RAG
+# kiteconnect>=5.0      # Zerodha broker adapter (real money)

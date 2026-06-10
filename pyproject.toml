@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quant-toolkit"
+version = "0.1.0"
+description = "A learning-oriented quant finance toolkit: data, indicators, valuation, screening, backtesting, and risk sizing."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "yfinance>=1.4.0",
+    "pandas>=3.0.0",
+    "numpy>=2.4.0",
+    "scipy>=1.17.0",
+    "matplotlib>=3.10.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=9.0.0"]
+
+[tool.setuptools.packages.find]
+include = ["quant*", "ats*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

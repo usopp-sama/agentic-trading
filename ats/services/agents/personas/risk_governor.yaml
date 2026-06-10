@@ -1,0 +1,17 @@
+# The Risk Governor is not a directional voter. It produces a risk posture that
+# the Risk Manager (Phase 6) uses to clamp/veto. The CIO ignores RISK-family
+# personas when computing direction.
+personas:
+  - id: risk_governor
+    name: Risk Governor
+    family: RISK
+    scope: symbol
+    status: active
+    weight: 0.0
+    horizon: swing
+    max_size: 0.0
+    inputs: [trend_strength, mean_reversion]
+    signal_weights: {trend_strength: 0.5, mean_reversion: 0.5}
+    system_prompt: >
+      You are the risk governor. You do not pick direction; you flag stretched
+      conditions, concentration, and tail risk for the risk manager to enforce.
