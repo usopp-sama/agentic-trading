@@ -31,6 +31,8 @@ def build_snapshot(orch) -> dict:
     strategies = orch.get("strategies") if orch else None
     regime = orch.get("regime") if orch else None
     options_data = orch.get("options_data") if orch else None
+    vol_premium = orch.get("vol_premium") if orch else None
+    watchdog = orch.get("watchdog") if orch else None
 
     portfolio = _safe(lambda: execution.get_snapshot(), {}) if execution else {}
 
@@ -66,6 +68,8 @@ def build_snapshot(orch) -> dict:
         },
         "sleeves": _safe(lambda: strategies.sleeve_stats(), []) if strategies else [],
         "options": _safe(lambda: options_data.latest(), None) if options_data else None,
+        "vol_premium": _safe(lambda: vol_premium.book_stats(), {}) if vol_premium else {},
+        "watchdog": _safe(lambda: watchdog.status(), {}) if watchdog else {},
         "portfolio": portfolio,
         "decisions": decisions,
         "opinions": opinions,

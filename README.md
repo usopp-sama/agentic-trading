@@ -71,9 +71,18 @@ each tagged with a style the regime layer understands:
 | `pairs_zscore` | Pairs / stat arb (7.4) | Z-score of log price ratio; long the cheap leg past 2σ (long-only book). |
 | `factor_composite` | Factor investing (7.10) | Top-N basket by momentum + low-vol + value + quality percentile ranks; ~quarterly rebalance. |
 | `nav_premium` | ETF NAV arbitrage (7.5) | SILVERBEES/GOLDBEES premium vs rolling fair ratio to COMEX silver/gold; buy the discount, exit the premium. |
+| `vol_premium` | Volatility risk premium (7.7) | Sells defined-risk NIFTY iron condors when ATM IV is rich vs realized; 50% profit target, 2x credit stop; never in crisis regime; paper-only. |
 | `sma_crossover` | Trend | 20/50 SMA crossover baseline. |
 | `mean_reversion` | Mean reversion | Bollinger %b band reversion. |
 | `volume_breakout` | Momentum | Price breakout confirmed by volume z-score. |
+
+## Autonomy & safety services (roadmap Part 10)
+
+| Component | What it does |
+|---|---|
+| `ats.services.watchdog` | Dead-man's switch: tracks bar heartbeats (market-hours aware), alerts on staleness, engages the kill switch after sustained silence. Never auto-releases — a human re-arms. |
+| `ats.services.telegram` | One-tap approvals (autonomy L1): staged orders arrive as messages with Approve/Reject buttons wired to the same audited approval path as the dashboard; alerts forwarded. Dormant without a token. |
+| `ats.services.execution.options_book` | Defined-risk options paper execution: credit spreads/iron condors with worst-case margin reserved at open — losses are bounded by construction. |
 
 ## India-market data layer
 
@@ -122,8 +131,11 @@ library (Part 7: trend, momentum, mean reversion, pairs, factor
 composite), regime detection (Part 7.12), sleeve P&L attribution +
 decay detection (Parts 8.2/8.5), regime-aware risk scaling, and
 inverse-vol capital allocation across sleeves (Part 8.4, stage 2).
-The options pricing/Greeks calculator (Phase 5) is in `quant.options`.
-Still ahead — value/quality factors once a fundamentals pipeline
-lands, the defined-risk vol-premium sleeve (needs an options-chain
-data source on top of `quant.options`), FinBERT sentiment, and
-ML-based signals with walk-forward validation.
+The options pricing/Greeks calculator (Phase 5) is in `quant.options`,
+and the strategy library is complete: all nine roadmap families,
+including the defined-risk vol-premium sleeve trading paper iron
+condors off the NIFTY IV monitor. Autonomy infrastructure (watchdog
+dead-man's switch, Telegram one-tap approvals) is in. Still ahead —
+FinBERT sentiment, dashboard rendering of the new panels, ML-based
+signals with walk-forward validation, and the Kite adapter when the
+paper track record earns real money.

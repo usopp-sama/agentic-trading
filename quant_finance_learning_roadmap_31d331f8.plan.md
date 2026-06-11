@@ -15,8 +15,8 @@ todos:
     content: "Build analysis engine: technical indicators (RSI, MACD, Bollinger), fundamental analysis (DCF calculator, ratio comparisons), backtesting framework."
     status: pending
   - id: tool-phase3
-    content: "Build signals and alerts: combine tech + fundamental signals, position sizing (Kelly), Telegram/email notifications."
-    status: pending
+    content: "Build signals and alerts: combine tech + fundamental signals, position sizing (Kelly), Telegram/email notifications. Done in repo: signal combination via CIO, fractional-Kelly sizing, Telegram alerts + one-tap trade approvals (inline buttons -> audited approval path). Email channel not built."
+    status: in_progress
   - id: intermediate-study
     content: Study time series analysis, stochastic calculus, market microstructure, derivatives pricing (Months 3-6). Read Hull's textbook.
     status: pending
@@ -33,14 +33,14 @@ todos:
     content: "Define the Strategy interface contract (data in -> desired position + conviction out, no broker access) so every strategy plugs into the same engine. Done: per-symbol Strategy + UniverseStrategy bases in ats/services/strategies/base.py."
     status: completed
   - id: strategy-library
-    content: "Implement proven strategies in priority order: ETF NAV arbitrage, trend following (Donchian/ATR), short-term mean reversion (RSI-2), pairs trading (cointegration), factor sleeve, defined-risk vol premium. Done: NAV premium/discount arb (SILVERBEES/GOLDBEES vs COMEX proxies), Donchian 55/20, RSI(2) with 200-SMA filter, 12-1 momentum, pairs z-score, factor composite with all four factors. Remaining: vol-premium sleeve — pricing (quant/options.py) and the NIFTY IV monitor (options_data service) are built; needs options EXECUTION (tradeable option instruments in the paper broker) before it can be a sleeve."
-    status: in_progress
+    content: "Implement proven strategies in priority order: ETF NAV arbitrage, trend following (Donchian/ATR), short-term mean reversion (RSI-2), pairs trading (cointegration), factor sleeve, defined-risk vol premium. ALL DONE: NAV premium/discount arb, Donchian 55/20, RSI(2) with 200-SMA filter, 12-1 momentum, pairs z-score, four-factor composite, and the vol-premium sleeve (paper-only defined-risk NIFTY iron condors via the options book; enters on IV premium >= 4pts, never in crisis regime, 50% profit target / 2x stop / expiry settle)."
+    status: completed
   - id: multi-strat-engine
     content: "Build multi-strategy orchestration: virtual capital sleeves, position netting engine, per-instrument exposure caps, risk-parity capital allocator, single OMS owning the broker connection. Done: sleeves with virtual P&L attribution + decay alerts, CIO netting, exposure caps, single execution path, and the full allocation ladder (inverse-vol -> correlation-aware ERC -> bounded performance tilt, auto-staged by history depth)."
     status: completed
   - id: risk-layer
-    content: "Build layered risk controls: per-trade 1% risk, per-strategy drawdown auto-disable, portfolio kill switch, fractional Kelly sizing, broker-level hard stops, trade-only API keys."
-    status: pending
+    content: "Build layered risk controls: per-trade 1% risk, per-strategy drawdown auto-disable, portfolio kill switch, fractional Kelly sizing, broker-level hard stops, trade-only API keys. Done in repo: fractional Kelly, immutable guardrails (position/sector/gross/order caps), daily-loss + watchdog kill switches, tradeability veto, defined-risk options margin, regime crisis scaling, sleeve decay alerts. Pending real broker: broker-level GTT hard stops, trade-only API keys; decay auto-disable still alert-only."
+    status: in_progress
   - id: paper-trading
     content: "Run every strategy through 3+ months of paper trading with production-identical code before any real money; then stage capital up the autonomy ladder."
     status: pending

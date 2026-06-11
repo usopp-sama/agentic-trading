@@ -112,6 +112,27 @@ class Settings(BaseSettings):
     news_poll_interval_s: int = 300
     agent_cycle_interval_s: int = 120
 
+    # --- Watchdog (dead-man's switch; roadmap Part 10) ---
+    watchdog_interval_s: int = 60
+    watchdog_stale_after_s: int = 600     # bar silence tolerated before unhealthy
+    watchdog_auto_kill: bool = True       # engage kill switch on sustained failure
+    watchdog_kill_after_failures: int = 3 # consecutive unhealthy checks
+
+    # --- Telegram approvals ---
+    telegram_poll_interval_s: int = 5
+
+    # --- Vol-premium sleeve (roadmap 7.7; paper-only, defined-risk) ---
+    vol_premium_enabled: bool = True
+    vol_entry_iv_premium: float = 0.04    # enter when ATM IV - realized >= 4 pts
+    vol_profit_target: float = 0.5        # close at 50% of credit captured
+    vol_stop_mult: float = 2.0            # close if debit reaches 2x credit
+    vol_otm_pct: float = 0.05             # short strikes ~5% OTM each side
+    vol_wing_steps: int = 4               # wings this many strike steps further
+    vol_max_lots: int = 1
+    vol_sleeve_capital: float = 100_000.0 # ~10% of the Rs 10 lakh paper book
+    nifty_strike_step: float = 50.0
+    nifty_lot_size: int = 75
+
     @property
     def is_real_money_active(self) -> bool:
         """Real orders may flow only when the gate is open AND mode is live."""
