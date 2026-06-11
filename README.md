@@ -53,7 +53,7 @@ python -m quant.projects.silverbees_nav --offline  # synthetic data
 | `quant.analysis.regime` | Market regime classifier: trend (up/down/range) x volatility (calm/normal/crisis) + style tilt matrix. |
 | `quant.analysis.valuation` | Two-stage DCF, dividend discount model, margin of safety, ETF NAV premium/discount, cost-of-carry futures price. |
 | `quant.analysis.screener` | Declarative, rule-based screener with ranking. |
-| `quant.backtest` | Vectorized, look-ahead-safe signal backtester + SMA-crossover baseline. |
+| `quant.backtest` | Vectorized, look-ahead-safe signal backtester + the anti-overfitting toolkit: walk-forward optimization, block-bootstrap Monte Carlo drawdowns, parameter-plateau scoring, deflated Sharpe ratio. |
 | `quant.risk` | Kelly criterion (discrete + continuous), fractional Kelly, capped position sizing. |
 | `quant.options` | Black-Scholes-Merton pricing + Greeks, implied vol (bisection), CRR binomial tree (American exercise). |
 | `quant.projects` | End-to-end mini-projects (SILVERBEES NAV analysis). |
@@ -69,7 +69,8 @@ each tagged with a style the regime layer understands:
 | `ts_momentum` | Time-series momentum (7.1/7.2) | Sign of 12-month return skipping the latest month; vol-scaled conviction. |
 | `rsi2_reversion` | Short-term mean reversion (7.3) | RSI(2) < 10 above the 200-SMA buys the pullback; > 70 exits. |
 | `pairs_zscore` | Pairs / stat arb (7.4) | Z-score of log price ratio; long the cheap leg past 2σ (long-only book). |
-| `factor_composite` | Factor investing (7.10) | Top-N basket by momentum + low-vol percentile ranks; ~quarterly rebalance. |
+| `factor_composite` | Factor investing (7.10) | Top-N basket by momentum + low-vol + value + quality percentile ranks; ~quarterly rebalance. |
+| `nav_premium` | ETF NAV arbitrage (7.5) | SILVERBEES/GOLDBEES premium vs rolling fair ratio to COMEX silver/gold; buy the discount, exit the premium. |
 | `sma_crossover` | Trend | 20/50 SMA crossover baseline. |
 | `mean_reversion` | Mean reversion | Bollinger %b band reversion. |
 | `volume_breakout` | Momentum | Price breakout confirmed by volume z-score. |

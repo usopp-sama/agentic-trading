@@ -21,7 +21,7 @@ from ats.core.events import EventBus, Topic
 from ats.core.logging import get_logger
 from ats.core.models import Decision, Instrument
 from ats.services.risk.allocator import desired_target_qty
-from ats.services.risk.guardrails import GuardrailInput, apply_guardrails
+from ats.services.risk.guardrails import GuardrailInput, apply_guardrails, is_tradeable
 
 log = get_logger("ats.risk")
 
@@ -34,6 +34,7 @@ class RiskService:
         self._md = None
         self._execution = None
         self._sectors: dict[str, str] = {}
+        self._itypes: dict[str, str] = {}
         self._order_times: deque[float] = deque(maxlen=200)
         self._orch = None
 
@@ -43,9 +44,9 @@ class RiskService:
         self._execution = ctx.orchestrator.get("execution")
         self._orch = ctx.orchestrator
         with session_scope() as s:
-            self._sectors = {
-                r.symbol: r.sector for r in s.execute(select(Instrument)).scalars().all()
-            }
+            rows = s.execute(select(Instrument)).scalars().all()
+            self._sectors = {r.symbol: r.sector for r in rows}
+            self._itypes = {r.symbol: r.instrument_type for r in rows}
         ctx.bus.subscribe(Topic.PROPOSAL, self._on_proposal)
 
     async def _on_proposal(self, evt) -> None:
@@ -55,6 +56,11 @@ class RiskService:
         symbol = proposal.get("symbol")
         if not symbol or self._execution is None:
             return {"status": "skipped"}
+
+        # Indices and commodity price feeds are references, never orders.
+        if not is_tradeable(self._itypes.get(symbol)):
+            self._record_decision(proposal, "HOLD", 0, ["not_tradeable"], status="blocked")
+            return {"status": "not_tradeable"}
 
         settings = get_settings()
         price = self._price(symbol)

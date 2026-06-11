@@ -441,6 +441,89 @@ class FactorComposite(UniverseStrategy):
         return out
 
 
+# ETF -> underlying price reference for NAV arbitrage (roadmap Parts 1, 7.5).
+DEFAULT_ETF_UNDERLYINGS: list[tuple[str, str]] = [
+    ("SILVERBEES.NS", "SI=F"),
+    ("GOLDBEES.NS", "GC=F"),
+]
+
+
+class NavPremium(UniverseStrategy):
+    """ETF NAV premium/discount arbitrage (roadmap Part 7.5) — the plan's
+    priority-one strategy and its very first project (SILVERBEES).
+
+    Official iNAV comes from the AMC; as a proxy, the fair ETF/underlying
+    price ratio is estimated as the rolling mean of the last ``window``
+    ratios (this self-anchors, so slow drifts like USDINR are absorbed).
+    Premium = current ratio / fair ratio - 1:
+
+    - premium <= -``entry_discount``  -> BUY the ETF (it's cheap vs NAV)
+    - premium >= +``exit_premium``    -> SELL (overpaying; exit/avoid)
+    - in between                      -> NEUTRAL
+
+    Only the ETF leg is ever signaled — the underlying is a COMEX price
+    feed, not an NSE instrument, and the risk layer vetoes it anyway.
+    """
+
+    id = "nav_premium"
+    style = "arbitrage"  # outside the regime tilt matrix on purpose
+
+    def __init__(
+        self,
+        etf_underlyings: list[tuple[str, str]] | None = None,
+        window: int = 60,
+        entry_discount: float = 0.015,
+        exit_premium: float = 0.010,
+    ) -> None:
+        self.etf_underlyings = (
+            etf_underlyings if etf_underlyings is not None else list(DEFAULT_ETF_UNDERLYINGS)
+        )
+        self.window = window
+        self.entry_discount, self.exit_premium = entry_discount, exit_premium
+        self.min_bars = window + 5
+
+    def symbols(self) -> list[str]:
+        return sorted({s for pair in self.etf_underlyings for s in pair})
+
+    def evaluate_universe(
+        self, history: dict[str, pd.DataFrame]
+    ) -> list[SignalModel]:
+        signals: list[SignalModel] = []
+        for etf, underlying in self.etf_underlyings:
+            df_e, df_u = history.get(etf), history.get(underlying)
+            if df_e is None or df_u is None:
+                continue
+            closes = pd.concat(
+                [df_e["close"].rename("etf"), df_u["close"].rename("und")],
+                axis=1, join="inner",
+            ).dropna()
+            if len(closes) < self.min_bars or (closes["und"] <= 0).any():
+                continue
+            ratio = closes["etf"] / closes["und"]
+            fair = float(ratio.tail(self.window).mean())
+            if not np.isfinite(fair) or fair <= 0:
+                continue
+            premium = float(ratio.iloc[-1] / fair - 1.0)
+            feats = {
+                "underlying": underlying,
+                "premium_pct": round(premium * 100.0, 2),
+                "fair_ratio": round(fair, 4),
+            }
+            if premium <= -self.entry_discount:
+                stretch = -premium / self.entry_discount
+                signals.append(
+                    self._signal(etf, Stance.BUY, min(1.0, 0.4 + 0.3 * (stretch - 1.0)), **feats)
+                )
+            elif premium >= self.exit_premium:
+                stretch = premium / self.exit_premium
+                signals.append(
+                    self._signal(etf, Stance.SELL, min(1.0, 0.4 + 0.3 * (stretch - 1.0)), **feats)
+                )
+            else:
+                signals.append(self._signal(etf, Stance.NEUTRAL, 0.0, **feats))
+        return signals
+
+
 def default_strategies() -> list[Strategy]:
     return [
         SmaCrossover(),
@@ -453,4 +536,4 @@ def default_strategies() -> list[Strategy]:
 
 
 def default_universe_strategies() -> list[UniverseStrategy]:
-    return [PairsZScore(), FactorComposite()]
+    return [PairsZScore(), FactorComposite(), NavPremium()]

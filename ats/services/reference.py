@@ -74,6 +74,10 @@ UNIVERSE: list[tuple[str, str, str, str]] = [
     ("SILVERBEES.NS", "Nippon Silver ETF", "Commodity ETF", "ETF"),
     ("GOLDBEES.NS", "Nippon Gold ETF", "Commodity ETF", "ETF"),
     ("NIFTYBEES.NS", "Nippon Nifty ETF", "Index ETF", "ETF"),
+    # Underlying references for ETF NAV arbitrage. COMMODITY instruments are
+    # price feeds only — the risk layer vetoes any order for them.
+    ("SI=F", "COMEX Silver Futures", "Commodity Futures", "COMMODITY"),
+    ("GC=F", "COMEX Gold Futures", "Commodity Futures", "COMMODITY"),
 ]
 
 
@@ -87,6 +91,7 @@ STRATEGIES: list[tuple[str, str, str, str]] = [
     ("ts_momentum", "12-1 Time-Series Momentum", "momentum", "paper"),
     ("pairs_zscore", "Pairs Z-Score (stat arb)", "stat_arb", "paper"),
     ("factor_composite", "Momentum + Low-Vol Factor Composite", "factor", "paper"),
+    ("nav_premium", "ETF NAV Premium/Discount Arbitrage", "arbitrage", "paper"),
 ]
 
 

@@ -50,6 +50,7 @@ class AgentService:
             strategies=ctx.orchestrator.get("strategies"),
             nlp=ctx.orchestrator.get("nlp"),
             knowledge=ctx.orchestrator.get("knowledge"),
+            fundamentals=ctx.orchestrator.get("fundamentals"),
         )
         self._runtime = SmeRuntime(providers)
         self._personas = self._load_personas()

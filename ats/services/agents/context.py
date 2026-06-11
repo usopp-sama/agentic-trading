@@ -83,7 +83,10 @@ class ContextAssembler:
         return None
 
     def _valuation_signal(self, symbol: str, tech: dict) -> float | None:
-        # Stub fundamental proxy: price vs 60-day mean (undervalued -> buy).
+        # Real fundamentals first; price-based proxy only as the fallback.
+        fundamental = self._fundamental_valuation(symbol)
+        if fundamental is not None:
+            return fundamental
         if not self.p.market_data:
             return None
         df = self.p.market_data.get_history(symbol)
@@ -94,6 +97,37 @@ class ContextAssembler:
         if price <= 0:
             return None
         return _clip((mean60 / price - 1.0) * 4)
+
+    def _fundamental_valuation(self, symbol: str) -> float | None:
+        """Cheapness vs the universe: median P/E and P/B over this name's.
+
+        A stock at half the universe's median multiples scores strongly
+        positive; one at double scores negative. Both ratios must be
+        positive to count (negative P/E means losses, not cheapness).
+        Requires a handful of peers so the median means something.
+        """
+        if not self.p.fundamentals:
+            return None
+        universe = self.p.fundamentals.all_latest() or {}
+        mine = universe.get(symbol)
+        if not mine:
+            return None
+        components: list[float] = []
+        for field, weight in (("pe", 1.5), ("pb", 1.0)):
+            value = mine.get(field)
+            peers = [
+                f[field] for f in universe.values()
+                if f.get(field) is not None and f[field] > 0
+            ]
+            if value is None or value <= 0 or len(peers) < 5:
+                continue
+            peers.sort()
+            median = peers[len(peers) // 2]
+            # median/value - 1: positive when cheaper than the universe.
+            components.append(math.tanh((median / value - 1.0) * weight))
+        if not components:
+            return None
+        return _clip(sum(components) / len(components))
 
     def _macro_signal(self) -> float | None:
         if not self.p.market_data:

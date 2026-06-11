@@ -23,6 +23,7 @@ class Providers:
     strategies: object | None = None
     nlp: object | None = None
     knowledge: object | None = None
+    fundamentals: object | None = None
 
 
 def get_price(p: Providers, symbol: str) -> dict:
@@ -85,6 +86,12 @@ def get_instrument_profile(p: Providers, symbol: str) -> dict:
     return p.knowledge.get_profile(symbol)
 
 
+def get_fundamentals(p: Providers, symbol: str) -> dict:
+    if not p.fundamentals:
+        return {}
+    return p.fundamentals.get(symbol) or {}
+
+
 REGISTRY = {
     "get_price": get_price,
     "get_technical": get_technical,
@@ -92,4 +99,5 @@ REGISTRY = {
     "get_sentiment": get_sentiment,
     "get_news": get_news,
     "get_instrument_profile": get_instrument_profile,
+    "get_fundamentals": get_fundamentals,
 }
