@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Expert Console — Agentic Trading</title>
+<style>
+  :root{
+    --bg:#0b0f17; --panel:#121826; --panel2:#0e1420; --line:#1f2a3a;
+    --ink:#e6edf6; --mut:#8aa0bd; --acc:#4da3ff; --good:#34d399; --bad:#f87171;
+    --warn:#fbbf24; --chip:#1a2436;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--panel2)}
+  header h1{font-size:16px;margin:0;font-weight:600}
+  header a{color:var(--mut);text-decoration:none;font-size:13px}
+  header a:hover{color:var(--acc)}
+  .badge{margin-left:auto;font-size:12px;padding:3px 10px;border-radius:999px;background:var(--chip);color:var(--mut)}
+  .badge.real{color:var(--good)} .badge.mock{color:var(--warn)}
+  .wrap{display:grid;grid-template-columns:280px 1fr;height:calc(100vh - 53px)}
+  aside{border-right:1px solid var(--line);overflow:auto;background:var(--panel2)}
+  .fam{padding:10px 14px 4px;color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+  .exp{padding:8px 14px;cursor:pointer;border-left:3px solid transparent}
+  .exp:hover{background:var(--panel)}
+  .exp.sel{background:var(--panel);border-left-color:var(--acc)}
+  .exp .nm{font-weight:500}
+  .exp .meta{color:var(--mut);font-size:12px}
+  main{display:flex;flex-direction:column;overflow:hidden}
+  .tabs{display:flex;gap:4px;padding:10px 16px 0;border-bottom:1px solid var(--line)}
+  .tab{padding:8px 16px;cursor:pointer;color:var(--mut);border-bottom:2px solid transparent}
+  .tab.sel{color:var(--ink);border-bottom-color:var(--acc)}
+  .view{flex:1;overflow:auto;padding:16px;display:none}
+  .view.sel{display:block}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  input,textarea,select,button{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  textarea{width:100%;resize:vertical;min-height:64px}
+  input.sym{width:120px;text-transform:uppercase}
+  input.msg{flex:1;min-width:220px}
+  button{cursor:pointer;background:var(--acc);border-color:var(--acc);color:#04122a;font-weight:600}
+  button.ghost{background:var(--chip);border-color:var(--line);color:var(--ink);font-weight:500}
+  button:disabled{opacity:.5;cursor:default}
+  .msg-list{display:flex;flex-direction:column;gap:12px;margin-bottom:14px}
+  .bubble{max-width:82%;padding:10px 13px;border-radius:12px;white-space:pre-wrap;word-wrap:break-word}
+  .bubble.user{align-self:flex-end;background:#16314f}
+  .bubble.assistant{align-self:flex-start;background:var(--panel);border:1px solid var(--line)}
+  .cites{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
+  .chip{font-size:11px;color:var(--mut);background:var(--chip);padding:2px 8px;border-radius:999px}
+  .hint{color:var(--mut);font-size:12px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
+  .stance{font-weight:700;padding:2px 8px;border-radius:6px;font-size:12px}
+  .s-strong_buy,.s-buy{background:#0f2e22;color:var(--good)}
+  .s-sell,.s-strong_sell{background:#3a1620;color:var(--bad)}
+  .s-neutral{background:var(--chip);color:var(--mut)}
+  .conv{height:6px;background:var(--chip);border-radius:4px;overflow:hidden;margin-top:6px}
+  .conv > i{display:block;height:100%;background:var(--acc)}
+  .head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .grow{flex:1}
+  .proposal{border:1px solid var(--acc)}
+  details{margin-top:8px}
+  summary{cursor:pointer;color:var(--mut)}
+  .rev{border-left:2px solid var(--line);padding:6px 0 6px 12px;margin:6px 0}
+  .act{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+  .act.flip,.act.exit{color:var(--bad)} .act.upgrade,.act.open{color:var(--good)} .act.downgrade{color:var(--warn)} .act.reaffirm{color:var(--mut)}
+  .composer{border-top:1px solid var(--line);padding:12px 16px;background:var(--panel2)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Expert Console</h1>
+  <a href="/">&larr; Dashboard</a>
+  <span id="modelBadge" class="badge">…</span>
+</header>
+<div class="wrap">
+  <aside id="roster"></aside>
+  <main>
+    <div class="tabs">
+      <div class="tab sel" data-tab="chat">Chat</div>
+      <div class="tab" data-tab="debate">Debate</div>
+      <div class="tab" data-tab="theses">Theses</div>
+    </div>
+
+    <!-- CHAT -->
+    <div class="view sel" id="view-chat" style="display:flex;flex-direction:column;padding:0">
+      <div class="view sel" style="display:block;flex:1" id="chatScroll">
+        <div id="chatWho" class="hint" style="margin-bottom:8px"></div>
+        <div class="msg-list" id="chatMsgs"></div>
+      </div>
+      <div class="composer">
+        <div class="row">
+          <input class="sym" id="chatSym" placeholder="SYMBOL (opt)" />
+          <input class="msg" id="chatMsg" placeholder="Ask the expert…  (Enter to send)" />
+          <button id="chatSend">Send</button>
+        </div>
+        <details style="margin-top:8px">
+          <summary>Share new information with the expert</summary>
+          <textarea id="chatInfo" placeholder="Paste a headline, an earnings note, your own view… the expert will reason over it (as untrusted data)."></textarea>
+        </details>
+      </div>
+    </div>
+
+    <!-- DEBATE -->
+    <div class="view" id="view-debate">
+      <div class="row" style="margin-bottom:12px">
+        <input class="sym" id="debSym" placeholder="SYMBOL" />
+        <select id="debRounds" class="ghost">
+          <option value="">rebuttal: auto</option>
+          <option value="0">0 (snapshot)</option>
+          <option value="1">1 round</option>
+          <option value="2">2 rounds</option>
+        </select>
+        <button id="debRun">Convene debate</button>
+        <span id="debHint" class="hint"></span>
+      </div>
+      <div id="debProposal"></div>
+      <div id="debOut"></div>
+    </div>
+
+    <!-- THESES -->
+    <div class="view" id="view-theses">
+      <div class="row" style="margin-bottom:12px">
+        <button class="ghost" id="thRefresh">Refresh</button>
+        <span class="hint">Living investment views. Revisit an expert from Chat (with a symbol) to create/update one.</span>
+      </div>
+      <div id="thOut"></div>
+    </div>
+  </main>
+</div>
+
+<script>
+const api = {
+  async get(u){ const r = await fetch(u); if(!r.ok) throw new Error(await r.text()); return r.json(); },
+  async post(u,b){ const r = await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}); if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail||r.statusText); return r.json(); },
+};
+function el(tag, props, kids){
+  const e = document.createElement(tag);
+  if(props) for(const k in props){ if(k==='class') e.className=props[k]; else if(k==='text') e.textContent=props[k]; else e.setAttribute(k,props[k]); }
+  (kids||[]).forEach(c=>e.appendChild(typeof c==='string'?document.createTextNode(c):c));
+  return e;
+}
+function stancePill(s){ return el('span',{class:'stance s-'+s, text:(s||'').replace('_',' ')}); }
+function convBar(c){ const b=el('div',{class:'conv'}); const i=el('i'); i.style.width=Math.round((c||0)*100)+'%'; b.appendChild(i); return b; }
+
+let selected = null;       // expert id
+let selectedName = '';
+let threadId = null;       // current chat thread
+let experts = [];
+
+async function loadState(){
+  try{ const st = await api.get('/api/state');
+    const b = document.getElementById('modelBadge');
+    const real = st.llm_provider && st.llm_provider!=='mock';
+    b.textContent = real ? ('LLM: '+st.llm_provider) : 'LLM: heuristic (mock)';
+    b.className = 'badge '+(real?'real':'mock');
+  }catch(e){}
+}
+
+async function loadRoster(){
+  const data = await api.get('/api/experts');
+  experts = data.experts;
+  const byFam = {};
+  experts.forEach(e=>{ (byFam[e.family||'?']=byFam[e.family||'?']||[]).push(e); });
+  const root = document.getElementById('roster'); root.textContent='';
+  const order = ['CIO','A','B','C','RISK'];
+  const names = {A:'Market / Quant',B:'Macro Pillars',C:'Instruments',RISK:'Risk',CIO:'Synthesis'};
+  order.concat(Object.keys(byFam).filter(f=>!order.includes(f))).forEach(fam=>{
+    if(!byFam[fam]) return;
+    root.appendChild(el('div',{class:'fam',text:names[fam]||fam}));
+    byFam[fam].forEach(e=>{
+      const meta = e.hit_rate!=null ? ('hit '+Math.round(e.hit_rate*100)+'% · n='+(e.n||0)) : (e.scope||'');
+      const node = el('div',{class:'exp',title:(e.inputs||[]).join(', ')},[
+        el('div',{class:'nm',text:e.name}),
+        el('div',{class:'meta',text:meta}),
+      ]);
+      node.onclick=()=>selectExpert(e.id,e.name,node);
+      e._node=node;
+      root.appendChild(node);
+    });
+  });
+}
+
+function selectExpert(id,name,node){
+  selected=id; selectedName=name; threadId=null;
+  document.querySelectorAll('.exp').forEach(n=>n.classList.remove('sel'));
+  if(node) node.classList.add('sel');
+  document.getElementById('chatWho').textContent='Talking to '+name+'. New conversation.';
+  document.getElementById('chatMsgs').textContent='';
+}
+
+function addBubble(role, text, meta){
+  const list=document.getElementById('chatMsgs');
+  const b=el('div',{class:'bubble '+role});
+  b.appendChild(document.createTextNode(text));
+  if(meta && (meta.citations||[]).length){
+    const c=el('div',{class:'cites'});
+    (meta.citations||[]).slice(0,6).forEach(x=>c.appendChild(el('span',{class:'chip',text:x})));
+    b.appendChild(c);
+  }
+  if(meta && meta.model){ b.appendChild(el('div',{class:'cites'},[el('span',{class:'chip',text:(meta.is_real?'':'heuristic · ')+meta.model})])); }
+  list.appendChild(b);
+  document.getElementById('chatScroll').scrollTop=1e9;
+}
+
+async function sendChat(){
+  if(!selected){ alert('Pick an expert on the left first.'); return; }
+  const msg=document.getElementById('chatMsg').value.trim();
+  if(!msg) return;
+  const sym=document.getElementById('chatSym').value.trim().toUpperCase();
+  const info=document.getElementById('chatInfo').value.trim();
+  document.getElementById('chatMsg').value='';
+  addBubble('user', msg + (info?('\n\n[shared info attached]'):''));
+  const btn=document.getElementById('chatSend'); btn.disabled=true; btn.textContent='…';
+  try{
+    const r=await api.post('/api/experts/'+encodeURIComponent(selected)+'/ask',
+      {message:msg, symbol:sym||null, info:info||null, thread_id:threadId});
+    threadId=r.thread_id;
+    document.getElementById('chatWho').textContent='Talking to '+selectedName+' · thread #'+threadId+(r.symbol?(' · '+r.symbol):'');
+    addBubble('assistant', r.answer, {citations:r.citations, model:r.model, is_real:r.is_real});
+    document.getElementById('chatInfo').value='';
+  }catch(e){ addBubble('assistant','[error] '+e.message); }
+  btn.disabled=false; btn.textContent='Send';
+}
+
+async function runDebate(){
+  const sym=document.getElementById('debSym').value.trim().toUpperCase();
+  if(!sym){ alert('Enter a symbol.'); return; }
+  const rv=document.getElementById('debRounds').value;
+  const btn=document.getElementById('debRun'); btn.disabled=true; btn.textContent='…';
+  document.getElementById('debOut').textContent=''; document.getElementById('debProposal').textContent='';
+  try{
+    const r=await api.post('/api/experts/debate',{symbol:sym, rounds: rv===''?null:parseInt(rv)});
+    document.getElementById('debHint').textContent = r.is_real ? (r.rounds+' rebuttal round(s)') : 'snapshot (mock LLM — enable a real model for rebuttals)';
+    const p=r.proposal;
+    const pc=el('div',{class:'card proposal'},[
+      el('div',{class:'head'},[el('b',{text:'CIO synthesis'}), stancePill((p.action||'hold').toLowerCase()==='buy'?'buy':(p.action==='SELL'?'sell':'neutral')), el('span',{class:'grow'}), el('span',{class:'chip',text:'target wt '+(p.target_weight||0)})]),
+      el('div',{text:p.rationale||''}),
+    ]);
+    document.getElementById('debProposal').appendChild(pc);
+    const last=r.transcript[r.transcript.length-1];
+    last.opinions.sort((a,b)=>b.conviction-a.conviction).forEach(o=>{
+      const card=el('div',{class:'card'},[
+        el('div',{class:'head'},[el('b',{text:o.name}), stancePill(o.stance), el('span',{class:'grow'}), el('span',{class:'chip',text:o.family})]),
+        convBar(o.conviction),
+        el('div',{style:'margin-top:6px',text:o.rationale||''}),
+      ]);
+      if((o.key_risks||[]).length){ card.appendChild(el('div',{class:'cites'}, o.key_risks.map(k=>el('span',{class:'chip',text:'risk: '+k})))); }
+      document.getElementById('debOut').appendChild(card);
+    });
+  }catch(e){ document.getElementById('debOut').appendChild(el('div',{class:'card',text:'[error] '+e.message})); }
+  btn.disabled=false; btn.textContent='Convene debate';
+}
+
+async function loadTheses(){
+  const out=document.getElementById('thOut'); out.textContent='Loading…';
+  try{
+    const r=await api.get('/api/experts/theses'); out.textContent='';
+    if(!r.theses.length){ out.appendChild(el('div',{class:'hint',text:'No theses yet.'})); return; }
+    r.theses.forEach(t=>{
+      const card=el('div',{class:'card'},[
+        el('div',{class:'head'},[
+          el('b',{text:t.symbol}), el('span',{class:'chip',text:t.expert}), stancePill(t.stance),
+          el('span',{class:'grow'}),
+          el('span',{class:'chip',text:t.revisions+' rev'}),
+          el('span',{class:'chip',text:t.status}),
+        ]),
+        convBar(t.conviction),
+        el('div',{style:'margin-top:6px',text:t.thesis||''}),
+      ]);
+      if(t.invalidation) card.appendChild(el('div',{class:'hint',text:'Invalidated if: '+t.invalidation}));
+      const det=el('details'); det.appendChild(el('summary',{text:'history'}));
+      const body=el('div'); det.appendChild(body);
+      det.ontoggle=async()=>{ if(det.open && !body.dataset.loaded){ body.dataset.loaded='1';
+        const h=await api.get('/api/experts/theses/'+t.id);
+        h.revisions.forEach(rv=>{ body.appendChild(el('div',{class:'rev'},[
+          el('span',{class:'act '+rv.action,text:rv.action}),
+          el('span',{text:'  '+rv.prev_stance+' → '+rv.new_stance}),
+          el('div',{class:'hint',text:rv.trigger||''}),
+          el('div',{text:rv.rationale||''}),
+        ])); });
+      }};
+      card.appendChild(det);
+      out.appendChild(card);
+    });
+  }catch(e){ out.textContent='[error] '+e.message; }
+}
+
+// tab switching
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('sel'));
+  document.querySelectorAll('main > .view').forEach(v=>v.classList.remove('sel'));
+  t.classList.add('sel');
+  document.getElementById('view-'+t.dataset.tab).classList.add('sel');
+  if(t.dataset.tab==='theses') loadTheses();
+});
+document.getElementById('chatSend').onclick=sendChat;
+document.getElementById('chatMsg').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); sendChat(); }});
+document.getElementById('debRun').onclick=runDebate;
+document.getElementById('thRefresh').onclick=loadTheses;
+
+loadState(); loadRoster();
+</script>
+</body>
+</html>

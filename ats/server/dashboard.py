@@ -24,6 +24,10 @@ def mount_dashboard(app: FastAPI) -> None:
     def index(request: Request):
         return templates.TemplateResponse(request, "dashboard.html")
 
+    @app.get("/experts", response_class=HTMLResponse)
+    def experts_page(request: Request):
+        return templates.TemplateResponse(request, "experts.html")
+
     @app.get("/api/dashboard")
     def dashboard_snapshot(request: Request):
         orch = getattr(request.app.state, "orchestrator", None)

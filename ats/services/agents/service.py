@@ -21,6 +21,9 @@ from ats.core.logging import get_logger
 from ats.core.models import SmeTrackRecord
 from ats.core.schemas import Opinion, ProposedPosition
 from ats.services.agents.cio import CIO
+from ats.services.agents.console import ExpertConsole
+from ats.services.agents.knowledge_base import get_knowledge_base
+from ats.services.agents.llm_client import build_llm_client
 from ats.services.agents.registry import families, load_personas
 from ats.services.agents.runtime import SmeRuntime
 from ats.services.agents.tools import Providers
@@ -42,6 +45,7 @@ class AgentService:
         self._symbol_personas: list[dict] = []
         self._macro_personas: list[dict] = []
         self._macro_tilt: float = 0.0
+        self._console: ExpertConsole | None = None
 
     async def start(self, ctx) -> None:
         self._bus = ctx.bus
@@ -57,6 +61,14 @@ class AgentService:
         self._by_id = {p["id"]: p for p in self._personas}
         self._symbol_personas = [p for p in self._personas if p["scope"] == "symbol"]
         self._macro_personas = [p for p in self._personas if p["scope"] == "market"]
+
+        # Domain knowledge base for grounding (built-in primers + user docs).
+        get_knowledge_base().ingest_all(providers.knowledge)
+
+        # Interactive expert console (tiered routing: stronger model for CIO).
+        self._console = ExpertConsole(
+            providers, self._by_id, self._runtime.llm, build_llm_client("cio")
+        )
 
         ctx.bus.subscribe(Topic.VOLUME_SPIKE, self._on_spike)
         ctx.bus.subscribe(Topic.SENTIMENT, self._on_sentiment)
@@ -118,6 +130,94 @@ class AgentService:
             await self._bus.publish(Topic.PROPOSAL, proposal.model_dump(mode="json"))
         return opinions, proposal
 
+    # --- debate (multi-expert) --------------------------------------------
+    async def debate(self, symbol: str, rounds: int | None = None) -> dict:
+        """Run a structured debate: every symbol-scope expert opines, then
+        (with a real LLM) reconsiders given peers' views, and finally the CIO
+        synthesizes a proposal. With the mock client the rebuttal rounds are
+        skipped (the heuristic has no new information to react to)."""
+        if self._runtime is None:
+            return {"symbol": symbol, "error": "runtime unavailable"}
+        from ats.core.config import get_settings
+
+        symbol = symbol.strip().upper()
+        rounds = rounds if rounds is not None else get_settings().debate_rounds
+        personas = list(self._symbol_personas)
+        is_real = bool(getattr(self._runtime.llm, "is_real", False))
+
+        opinions: dict[str, object] = {}
+        for p in personas:
+            try:
+                opinions[p["id"]] = self._runtime.opine(p, symbol)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("debate_opine_failed", extra={"sme": p["id"], "error": str(exc)})
+
+        transcript = [{"round": 0, "opinions": self._debate_round(personas, opinions)}]
+
+        effective_rounds = rounds if is_real else 0
+        for r in range(1, effective_rounds + 1):
+            peers = self._peer_summaries(opinions)
+            updated: dict[str, object] = {}
+            for p in personas:
+                others = [op for sid, op in peers.items() if sid != p["id"]]
+                try:
+                    updated[p["id"]] = self._runtime.opine(p, symbol, {"peer_opinions": others})
+                except Exception:  # noqa: BLE001
+                    updated[p["id"]] = opinions.get(p["id"])
+            opinions = {k: v for k, v in updated.items() if v is not None}
+            transcript.append({"round": r, "opinions": self._debate_round(personas, opinions)})
+
+        weights = {
+            p["id"]: self._effective_weight(p)
+            for p in personas
+            if p["family"] != "RISK" and p["id"] in opinions
+        }
+        proposal = self._cio.aggregate(
+            symbol, [opinions[k] for k in weights], weights, self._macro_tilt
+        )
+        if self._bus is not None:
+            await self._bus.publish(
+                Topic.OPINION, {"kind": "debate", "symbol": symbol, "action": proposal.action}
+            )
+        return {
+            "symbol": symbol,
+            "rounds": effective_rounds,
+            "is_real": is_real,
+            "macro_tilt": round(self._macro_tilt, 3),
+            "transcript": transcript,
+            "proposal": proposal.model_dump(mode="json"),
+        }
+
+    def _debate_round(self, personas: list[dict], opinions: dict) -> list[dict]:
+        by_id = {p["id"]: p for p in personas}
+        out = []
+        for sid, op in opinions.items():
+            p = by_id.get(sid, {})
+            out.append(
+                {
+                    "sme": sid,
+                    "name": p.get("name", sid),
+                    "family": p.get("family"),
+                    "stance": op.stance.value,
+                    "conviction": round(op.conviction, 3),
+                    "rationale": op.rationale,
+                    "key_risks": op.key_risks,
+                }
+            )
+        return out
+
+    @staticmethod
+    def _peer_summaries(opinions: dict) -> dict[str, dict]:
+        return {
+            sid: {
+                "sme": sid,
+                "stance": op.stance.value,
+                "conviction": round(op.conviction, 3),
+                "rationale": op.rationale,
+            }
+            for sid, op in opinions.items()
+        }
+
     # --- weights -----------------------------------------------------------
     def _effective_weight(self, persona: dict) -> float:
         base = float(persona.get("weight", 0.0))
@@ -133,6 +233,9 @@ class AgentService:
     # --- introspection -----------------------------------------------------
     def personas(self) -> list[dict]:
         return list(self._personas)
+
+    def console(self) -> ExpertConsole | None:
+        return self._console
 
     @property
     def macro_tilt(self) -> float:

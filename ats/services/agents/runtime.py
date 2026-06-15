@@ -52,6 +52,18 @@ class SmeRuntime:
             await bus.publish(Topic.OPINION, opinion.model_dump(mode="json"))
         return opinion
 
+    def opine(self, persona: dict, symbol: str, extra_context: dict | None = None) -> Opinion:
+        """One grounded opinion with no caching/persistence/publishing.
+
+        Used by the debate orchestrator to re-poll an expert with peer context
+        merged in, without touching the live cache or event stream.
+        """
+        context = self.assembler.assemble(persona, symbol)
+        if extra_context:
+            context = {**context, **extra_context}
+        raw = self.llm.generate_opinion(persona, context)
+        return self._validate(persona, symbol, raw, context)
+
     def _validate(self, persona: dict, symbol: str, raw: dict, context: dict) -> Opinion:
         try:
             stance = Stance(raw.get("stance", "neutral"))

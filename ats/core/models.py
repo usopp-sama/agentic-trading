@@ -299,6 +299,72 @@ class AuditLog(Base):
     prev_hash: Mapped[str] = mapped_column(String(64), default="")
 
 
+class ExpertThread(Base):
+    """A conversation with a single expert (an SME id, or 'cio').
+
+    Threads give the interactive console memory: each turn is persisted and the
+    most recent turns are replayed to the model so the expert remembers the
+    discussion. Optionally pinned to a symbol so grounding is auto-assembled.
+    """
+
+    __tablename__ = "expert_threads"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    expert: Mapped[str] = mapped_column(String(64), index=True)
+    symbol: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(256), default="")
+    created_ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class ExpertMessage(Base):
+    __tablename__ = "expert_messages"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    thread_id: Mapped[int] = mapped_column(ForeignKey("expert_threads.id"), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    role: Mapped[str] = mapped_column(String(16), default="user")  # user/assistant
+    content: Mapped[str] = mapped_column(Text, default="")
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)  # citations, grounding, model
+
+
+class PositionThesis(Base):
+    """A living investment thesis for an (expert, symbol).
+
+    Unlike an immutable opinion row, a thesis is revisited as new evidence
+    arrives: the expert can reaffirm, upgrade, downgrade, or exit, and each
+    change is recorded as a linked revision. This is what lets an expert
+    "alter past decisions" with an auditable trail.
+    """
+
+    __tablename__ = "position_theses"
+    __table_args__ = (UniqueConstraint("expert", "symbol", name="uq_thesis"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    expert: Mapped[str] = mapped_column(String(64), index=True)
+    symbol: Mapped[str] = mapped_column(String(64), index=True)
+    stance: Mapped[str] = mapped_column(String(16), default="neutral")
+    conviction: Mapped[float] = mapped_column(Float, default=0.0)
+    thesis: Mapped[str] = mapped_column(Text, default="")       # the current view
+    invalidation: Mapped[str] = mapped_column(Text, default="")  # what would flip it
+    status: Mapped[str] = mapped_column(String(16), default="open", index=True)  # open/closed
+    created_ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+    revision_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ThesisRevision(Base):
+    __tablename__ = "thesis_revisions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    thesis_id: Mapped[int] = mapped_column(ForeignKey("position_theses.id"), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    prev_stance: Mapped[str] = mapped_column(String(16), default="neutral")
+    new_stance: Mapped[str] = mapped_column(String(16), default="neutral")
+    prev_conviction: Mapped[float] = mapped_column(Float, default=0.0)
+    new_conviction: Mapped[float] = mapped_column(Float, default=0.0)
+    action: Mapped[str] = mapped_column(String(16), default="reaffirm")  # reaffirm/upgrade/downgrade/flip/exit
+    trigger: Mapped[str] = mapped_column(Text, default="")  # what new info prompted this
+    rationale: Mapped[str] = mapped_column(Text, default="")
+    author: Mapped[str] = mapped_column(String(32), default="expert")  # expert/human
+
+
 class KvState(Base):
     """Small key/value table for runtime state (kill switch, mode, etc.)."""
 
