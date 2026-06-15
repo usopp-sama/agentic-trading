@@ -39,6 +39,15 @@ class Settings(BaseSettings):
     # --- Vector store ("memory" fallback; "chroma" if installed) ---
     vector_store: str = "memory"
 
+    # --- Expert knowledge base (RAG grounding for SMEs) ---
+    # Built-in domain primers ship per family; drop your own .md/.txt notes,
+    # research, or filings here to extend any expert's reading.
+    knowledge_dir: str = str(DATA_DIR / "knowledge")
+    knowledge_retrieval_k: int = 4
+    # Multi-expert debate (Phase 5): rounds of critique before the CIO blends.
+    debate_rounds: int = 1
+    expert_memory_messages: int = 20  # per-thread chat history kept for context
+
     # --- LLM (provider: "mock" | "ollama" | "openai") ---
     # "mock" is a deterministic, grounded heuristic so the whole system runs
     # with no API key. You manage real providers/keys.

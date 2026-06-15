@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import math
 
+from ats.core.config import get_settings
 from ats.services.agents import tools
+from ats.services.agents.knowledge_base import get_knowledge_base, keywords
 from ats.services.agents.tools import Providers
 
 
@@ -40,12 +42,15 @@ class ContextAssembler:
             if val is not None:
                 signals[name] = round(val, 4)
 
+        news_texts = [n["text"][:120] for n in news]
+        knowledge = self._retrieve_knowledge(persona, symbol, news_texts)
         evidence = {
             "technical": tech,
             "volume": vol,
             "sentiment": sent,
-            "news": [n["text"][:120] for n in news],
+            "news": news_texts,
             "profile": {k: profile.get(k) for k in ("sector", "themes") if k in profile},
+            "knowledge": [k["text"] for k in knowledge],
         }
         evidence_count = sum(1 for v in (tech, vol, sent, news, profile) if v)
 
@@ -56,8 +61,33 @@ class ContextAssembler:
             "evidence": evidence,
             "evidence_count": evidence_count,
             "risks": self._risks(tech, sent),
-            "news": evidence["news"],
+            "news": news_texts,
+            "knowledge": knowledge,
         }
+
+    def _retrieve_knowledge(self, persona: dict, symbol: str, news_texts: list[str]) -> list[dict]:
+        """Pull domain-relevant primer/research chunks for this expert.
+
+        The query blends the symbol, the persona's declared inputs, its name,
+        and recent headlines so retrieval reflects both the expert's lens and
+        what is happening now. Scoped to the persona's family + shared pool.
+        """
+        try:
+            kb = get_knowledge_base()
+            if len(kb) == 0:
+                kb.ingest_all(self.p.knowledge)
+            query = " ".join(
+                [
+                    symbol,
+                    persona.get("name", ""),
+                    " ".join(persona.get("inputs", [])),
+                    keywords(" ".join(news_texts), limit=10),
+                ]
+            ).strip()
+            k = get_settings().knowledge_retrieval_k
+            return kb.retrieve(query, family=persona.get("family"), k=k)
+        except Exception:  # noqa: BLE001 - grounding is best-effort, never fatal
+            return []
 
     def _signal(self, name, symbol, tech, vol, sent, profile) -> float | None:
         if name == "momentum" and tech:
