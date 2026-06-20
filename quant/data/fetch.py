@@ -56,6 +56,38 @@ def fetch_prices(
     return _normalize(raw)
 
 
+def fetch_prices_batch(
+    tickers: list[str], period: str = "6mo", interval: str = "1d"
+) -> dict[str, pd.DataFrame]:
+    """Download many tickers in one threaded request; return {ticker: OHLCV}.
+
+    Far faster and gentler on the API than looping ``fetch_prices`` per symbol.
+    Tickers that return nothing are simply omitted from the result.
+    """
+    if not tickers:
+        return {}
+    try:
+        import yfinance as yf
+    except ImportError as exc:  # pragma: no cover - import guard
+        raise RuntimeError("yfinance is not installed.") from exc
+
+    raw = yf.download(
+        tickers, period=period, interval=interval,
+        auto_adjust=True, progress=False, group_by="ticker", threads=True,
+    )
+    out: dict[str, pd.DataFrame] = {}
+    multi = isinstance(raw.columns, pd.MultiIndex)
+    for t in tickers:
+        try:
+            sub = raw[t] if (multi and t in raw.columns.get_level_values(0)) else raw
+            df = _normalize(sub)
+            if not df.empty:
+                out[t] = df
+        except Exception:  # noqa: BLE001 - skip symbols that failed
+            continue
+    return out
+
+
 def _normalize(raw: pd.DataFrame) -> pd.DataFrame:
     """Flatten yfinance output to the canonical OHLCV schema."""
     df = raw.copy()

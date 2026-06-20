@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Logs{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="card span4">
+    <h2>Topic Rates</h2><p class="sub">Cumulative event volume per topic this session.</p>
+    <div class="scroll" id="rates" style="max-height:520px"></div>
+  </div>
+  <div class="card span8">
+    <h2>Event Stream</h2>
+    <p class="sub">Every system event, colour-coded by pipeline stage. Newest on top.
+      <span class="spacer"></span>
+      <label class="muted"><input type="checkbox" id="pause"> pause</label>
+    </p>
+    <div class="scroll" id="stream" style="max-height:520px"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+const $=(id)=>document.getElementById(id), E=ATS.esc, MAP=ATS.TOPIC_STAGE;
+const counters={}; const lines=[];
+function summarize(topic,p){
+  const sym=p.symbol||(p.tickers||[]).join(',')||'';
+  if(topic==='agent.opinion') return `${p.sme||''} ${p.stance||''} ${sym} ${ATS.fmt(p.conviction)}`;
+  if(topic==='exec.decision') return `${p.action||''} ${sym} ${p.status||''}`;
+  if(topic==='exec.fill') return `${sym} ${p.side||''} ${p.qty||''}@${ATS.fmt(p.fill_price)}`;
+  if(topic==='market.volume_spike') return `${sym} z=${ATS.fmt(p.zscore)}`;
+  if(topic==='news.item') return (p.title||'').slice(0,90);
+  if(topic==='news.sentiment') return `${sym} ${p.label||''} ${ATS.fmt(p.score)}`;
+  if(topic==='strategy.signal') return `${p.strategy||''} ${sym} ${p.stance||''}`;
+  return sym||JSON.stringify(p).slice(0,80);
+}
+function rowHtml(l){
+  const cl='t-'+(MAP[l.topic]||'other');
+  return `<div class="logline"><span class="t">${ATS.ago(l.ts)} ago</span>
+    <span class="topic ${cl}">${E(l.topic)}</span><span>${E(l.sum)}</span></div>`;
+}
+function drawStream(){ if($('pause').checked) return; $('stream').innerHTML=lines.map(rowHtml).join('')||'<div class="muted">Waiting…</div>'; }
+function drawRates(){
+  const rows=Object.entries(counters).sort((a,b)=>b[1]-a[1]); const max=Math.max(1,...rows.map(r=>r[1]));
+  $('rates').innerHTML=rows.map(([t,c])=>{
+    const cl='t-'+(MAP[t]||'other');
+    return `<div class="news-item"><span class="topic ${cl}">${E(t)}</span>
+      <span class="muted" style="float:right">${c}</span>
+      <div class="bar"><span style="width:${Math.round(c/max*100)}%;background:var(--blue)"></span></div></div>`;
+  }).join('')||'<div class="muted">No events yet.</div>';
+}
+function push(topic,payload,ts){ lines.unshift({topic,sum:summarize(topic,payload||{}),ts:ts||new Date().toISOString()}); lines.splice(300); }
+
+ATS.on('recent',(m)=>{
+  Object.assign(counters,m.counters||{});
+  (m.events||[]).forEach(e=>push(e.topic,e.payload,e.ts));
+  drawStream(); drawRates();
+});
+ATS.on('event',(m)=>{ counters[m.topic]=(counters[m.topic]||0)+1; push(m.topic,m.payload,m.ts); drawStream(); drawRates(); });
+ATS.fetchJSON('/api/logs').then(d=>{ Object.assign(counters,d.counters||{}); drawRates(); }).catch(()=>{});
+</script>
+{% endblock %}

@@ -45,6 +45,7 @@ class ScraperService:
         self._bus: EventBus | None = None
         self._mapper: TickerMapper | None = None
         self._collectors: list = []
+        self._mock_fallback: MockCollector | None = None
 
     async def start(self, ctx) -> None:
         self._bus = ctx.bus
@@ -65,31 +66,48 @@ class ScraperService:
 
         settings = get_settings()
         collectors: list = []
+        # Real, live news first: a finance news API if a key is set, plus
+        # credible Indian finance RSS feeds (always best-effort).
         if settings.marketaux_api_key:
             collectors.append(MarketauxCollector(settings.marketaux_api_key))
-        collectors.append(RssCollector())  # best-effort
-        # Offline/dev: synthesize news so the pipeline always has signal.
-        if settings.data_source == "synthetic" or settings.env == "dev":
-            with session_scope() as s:
-                universe = [
-                    (r.symbol, r.name, r.sector)
-                    for r in s.execute(
-                        select(Instrument).where(Instrument.instrument_type != "INDEX")
-                    ).scalars().all()
-                ]
-            collectors.append(MockCollector(universe, n=6))
+        collectors.append(RssCollector())
+
+        # Mock is only an offline safety net - used when live feeds return
+        # nothing this cycle (no network/keys), never mixed into real news.
+        with session_scope() as s:
+            universe = [
+                (r.symbol, r.name, r.sector)
+                for r in s.execute(
+                    select(Instrument).where(Instrument.instrument_type != "INDEX")
+                ).scalars().all()
+            ]
+        self._mock_fallback = MockCollector(universe, n=6)
         return collectors
 
     async def collect_once(self) -> int:
         if self._mapper is None:
             return 0
+        published, collected = await self._run_collectors(self._collectors)
+        # Only synthesize news if the live feeds returned NOTHING at all (true
+        # offline). All-duplicates (collected>0, published==0) is normal and
+        # must NOT trigger the mock fallback.
+        if collected == 0 and self._mock_fallback is not None:
+            log.info("news_live_empty_using_fallback")
+            published, _ = await self._run_collectors([self._mock_fallback])
+        if published:
+            log.info("news_published", extra={"count": published})
+        return published
+
+    async def _run_collectors(self, collectors: list) -> tuple[int, int]:
         published = 0
-        for collector in self._collectors:
+        collected = 0
+        for collector in collectors:
             try:
                 items = collector.collect()
             except Exception as exc:  # noqa: BLE001
                 log.warning("collector_failed", extra={"collector": collector.name, "error": str(exc)})
                 continue
+            collected += len(items)
             for raw in items:
                 news_id = self._persist(raw)
                 if news_id is None:
@@ -98,22 +116,18 @@ class ScraperService:
                 body = _sanitize(raw.get("body", ""))
                 tickers = self._mapper.match(f"{title} {body}")
                 if self._bus is not None:
-                    await self._bus.publish(
-                        Topic.NEWS,
-                        {
-                            "news_id": news_id,
-                            "title": title,
-                            "body": body,
-                            "tickers": tickers,
-                            "source": raw.get("source"),
-                            "url": raw.get("url"),
-                            "ts": raw.get("ts"),
-                        },
-                    )
+                    await self._publish_news(news_id, title, body, tickers, raw)
                 published += 1
-        if published:
-            log.info("news_published", extra={"count": published})
-        return published
+        return published, collected
+
+    async def _publish_news(self, news_id, title, body, tickers, raw) -> None:
+        await self._bus.publish(
+            Topic.NEWS,
+            {
+                "news_id": news_id, "title": title, "body": body, "tickers": tickers,
+                "source": raw.get("source"), "url": raw.get("url"), "ts": raw.get("ts"),
+            },
+        )
 
     def _persist(self, raw: dict) -> int | None:
         title = _sanitize(raw.get("title", ""))

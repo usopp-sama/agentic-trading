@@ -8,7 +8,7 @@ from ats.core import state
 from ats.core.config import get_settings
 from ats.core.db import session_scope
 from ats.core.logging import get_logger
-from ats.core.models import Decision, NewsItem, SmeOpinion
+from ats.core.models import Decision, NewsItem, SentimentScore, SmeOpinion
 
 log = get_logger("ats.dashboard")
 
@@ -34,7 +34,10 @@ def build_snapshot(orch) -> dict:
     vol_premium = orch.get("vol_premium") if orch else None
     watchdog = orch.get("watchdog") if orch else None
 
+    nlp = orch.get("nlp") if orch else None
     portfolio = _safe(lambda: execution.get_snapshot(), {}) if execution else {}
+    watchset = set(_safe(lambda: market.watchlist(), [])) if market else set()
+    data_status = _safe(lambda: market.data_status(), {"mode": "synthetic"}) if market else {"mode": "synthetic"}
 
     with session_scope() as s:
         decisions = [
@@ -48,10 +51,35 @@ def build_snapshot(orch) -> dict:
              "conviction": o.conviction, "rationale": o.rationale}
             for o in s.execute(select(SmeOpinion).order_by(SmeOpinion.id.desc()).limit(12)).scalars().all()
         ]
-        news = [
-            {"ts": n.ts.isoformat(), "source": n.source, "title": n.title, "tickers": n.tickers}
-            for n in s.execute(select(NewsItem).order_by(NewsItem.id.desc()).limit(10)).scalars().all()
-        ]
+        # Recent news, with a flag + sentiment for items touching the watchlist.
+        raw_news = s.execute(select(NewsItem).order_by(NewsItem.id.desc()).limit(60)).scalars().all()
+        news, watchlist_news = [], []
+        for n in raw_news:
+            tickers = n.tickers or []
+            relevant = [t for t in tickers if t in watchset]
+            sent = None
+            if relevant:
+                row = s.execute(
+                    select(SentimentScore).where(SentimentScore.news_id == n.id).limit(1)
+                ).scalar_one_or_none()
+                if row is not None:
+                    sent = {"label": row.label, "score": round(row.score, 3)}
+            item = {"ts": n.ts.isoformat(), "source": n.source, "title": n.title,
+                    "url": n.url, "tickers": tickers, "watch": relevant, "sentiment": sent}
+            news.append(item)
+            if relevant and len(watchlist_news) < 12:
+                watchlist_news.append(item)
+
+    # Per-symbol sentiment board: watchlist names with recent news, ranked by
+    # how strongly the news leans (positive or negative).
+    sentiment_board: list[dict] = []
+    if nlp is not None:
+        for sym in watchset:
+            agg = _safe(lambda sym=sym: nlp.recent_sentiment(sym), {"count": 0})
+            if agg.get("count", 0) > 0:
+                sentiment_board.append({"symbol": sym, **agg})
+        sentiment_board.sort(key=lambda x: abs(x.get("mean_score", 0.0)), reverse=True)
+        sentiment_board = sentiment_board[:10]
 
     return {
         "state": {
@@ -60,9 +88,10 @@ def build_snapshot(orch) -> dict:
             "real_money_enabled": settings.real_money_enabled,
             "real_money_active": state.real_money_active(),
             "data_source": settings.data_source,
+            "data_status": data_status,
             "llm_provider": settings.llm_provider,
             "macro_tilt": round(agents.macro_tilt, 4) if agents else 0.0,
-            "watchlist": len(market.watchlist()) if market else 0,
+            "watchlist": len(watchset),
             "audit_chain_ok": _safe(state.verify_audit_chain, True),
             "regime": _safe(lambda: regime.current().label, "range/normal") if regime else "range/normal",
         },
@@ -73,7 +102,9 @@ def build_snapshot(orch) -> dict:
         "portfolio": portfolio,
         "decisions": decisions,
         "opinions": opinions,
-        "news": news,
+        "news": news[:12],
+        "watchlist_news": watchlist_news,
+        "sentiment_board": sentiment_board,
         "approvals": _safe(lambda: execution.list_pending_approvals(), []) if execution else [],
         "leaderboard": _safe(lambda: learning.leaderboard(), []) if learning else [],
         "rulebook": _safe(lambda: rules.rulebook(), []) if rules else [],

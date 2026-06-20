@@ -43,6 +43,10 @@ class MarketDataService:
     async def start(self, ctx) -> None:
         self._bus = ctx.bus
         self._symbols = self._load_watchlist()
+        # One batched download warms the cache for all symbols at once.
+        prefetch = getattr(self.source, "prefetch", None)
+        if prefetch is not None:
+            prefetch(self._symbols)
         backfilled = 0
         for symbol in self._symbols:
             try:
@@ -135,6 +139,18 @@ class MarketDataService:
 
     def watchlist(self) -> list[str]:
         return list(self._symbols)
+
+    def data_status(self) -> dict:
+        """Report how many symbols are on the live feed vs synthetic fallback."""
+        is_live = getattr(self.source, "is_live", None)
+        if is_live is None:
+            return {"mode": "synthetic", "live": 0, "total": len(self._symbols)}
+        live = sum(1 for s in self._symbols if is_live(s))
+        return {
+            "mode": "live" if live else "synthetic",
+            "live": live,
+            "total": len(self._symbols),
+        }
 
     @staticmethod
     def _load_watchlist() -> list[str]:

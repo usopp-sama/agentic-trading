@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Overview{% endblock %} · Agentic Trading</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header>
+    <h1>⚡ ATS</h1>
+    <nav>
+      <a href="/"         class="{{ 'active' if active=='overview' else '' }}">Overview</a>
+      <a href="/pipeline" class="{{ 'active' if active=='pipeline' else '' }}">Pipeline</a>
+      <a href="/agents"   class="{{ 'active' if active=='agents'   else '' }}">Agents</a>
+      <a href="/experts"  class="{{ 'active' if active=='experts'  else '' }}">Experts</a>
+      <a href="/news"     class="{{ 'active' if active=='news'     else '' }}">News</a>
+      <a href="/logs"     class="{{ 'active' if active=='logs'     else '' }}">Logs</a>
+    </nav>
+    <span class="spacer"></span>
+    <span class="pill gray" id="hdrData">–</span>
+    <span class="muted">equity</span><b id="hdrEquity">–</b>
+    <span class="pill gray" id="hdrMoney">–</span>
+    <span class="muted">mode</span>
+    <select id="modeSel" title="Trading mode">
+      <option>OFF</option><option>PAPER</option><option>APPROVAL</option><option>AUTO</option>
+    </select>
+    <span class="pill gray" id="hdrMode">–</span>
+    <button id="killBtn" class="danger">Kill</button>
+    <span class="pill gray" id="hdrKill">–</span>
+    <span class="wsdot" id="wsdot" title="live connection"></span>
+  </header>
+
+  {% block content %}{% endblock %}
+
+  <div id="toasts"></div>
+  <script src="/static/app.js"></script>
+  {% block script %}{% endblock %}
+</body>
+</html>
