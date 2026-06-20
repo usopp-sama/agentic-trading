@@ -15,6 +15,7 @@ you supply is passed to the model as untrusted DATA, never as instructions.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy import desc, select
@@ -30,9 +31,14 @@ from ats.core.models import (
     ThesisRevision,
 )
 from ats.services.agents.context import ContextAssembler
+from ats.services.agents.directives import get_directive_store
 from ats.services.agents.knowledge_base import get_knowledge_base
 from ats.services.agents.llm_client import LLMClient
 from ats.services.agents.tools import Providers
+
+_REMEMBER_RE = re.compile(r"^\s*(remember|learn|note)\b[\s:,\-]*(that\s+|this[:,]?\s+)?(.+)", re.I | re.S)
+_FORGET_RE = re.compile(r"^\s*forget\b[\s:,\-]*(that\s+|the\s+)?(.+)", re.I | re.S)
+_FAMILIES = {"A", "B", "C", "RISK"}
 
 log = get_logger("ats.expert_console")
 
@@ -93,6 +99,7 @@ class ExpertConsole:
         self.personas = personas_by_id
         self.sme_client = sme_client
         self.cio_client = cio_client or sme_client
+        self.directives = get_directive_store()
 
     # --- roster ------------------------------------------------------------
     def experts(self) -> list[dict]:
@@ -133,6 +140,20 @@ class ExpertConsole:
 
         thread = self._load_or_create_thread(expert_id, message, symbol, thread_id)
         symbol = symbol or thread.symbol
+
+        # "remember / learn / forget" short-circuits into directive CRUD: the
+        # expert writes durable knowledge it will retrieve in future reasoning.
+        intent = self._directive_intent(expert_id, persona, message, symbol, thread.id)
+        if intent is not None:
+            self._persist_turn(
+                thread.id, message, intent["answer"],
+                {"kind": "directive", "op": intent["op"], "stable_id": intent.get("stable_id")},
+            )
+            return {
+                "thread_id": thread.id, "expert": expert_id, "symbol": symbol,
+                "answer": intent["answer"], "citations": [], "grounding": {},
+                "model": "directive", "is_real": False, "directive": intent,
+            }
 
         grounding, citations = self._ground(persona, symbol, message)
         history = self._history(thread.id)
@@ -280,6 +301,19 @@ class ExpertConsole:
                 for r in rows
             ]
 
+    # --- directives (self-evolving knowledge, context only) ----------------
+    def list_directives(self, symbol: str | None = None, family: str | None = None) -> list[dict]:
+        return self.directives.list_directives(symbol=symbol, family=family)
+
+    def add_directive(self, title: str, rule: str, symbol: str | None = None,
+                      family: str | None = None, level: str = "L2", expert: str = "human") -> dict:
+        fam = family if family in _FAMILIES else None
+        return self.directives.upsert(title=title, rule=rule, expert=expert, author="human",
+                                      symbol=symbol, family=fam, level=level)
+
+    def forget_directive(self, stable_id: str) -> bool:
+        return self.directives.forget(stable_id)
+
     def thesis_history(self, thesis_id: int) -> dict:
         with session_scope() as s:
             th = s.get(PositionThesis, thesis_id)
@@ -359,6 +393,9 @@ class ExpertConsole:
                     title = kdoc.get("metadata", {}).get("title") or kdoc.get("doc_id")
                     grounding.setdefault("knowledge", []).append(kdoc["text"])
                     citations.append(f"kb: {title}")
+                for d in ctx.get("directives", []):
+                    grounding.setdefault("directives", []).append(d["text"])
+                    citations.append(f"directive: {d.get('title') or d.get('stable_id')}")
             except Exception:  # noqa: BLE001
                 grounding = {}
         else:
@@ -368,9 +405,45 @@ class ExpertConsole:
                 hits = self.kb.retrieve(message, family=persona.get("family"), k=get_settings().knowledge_retrieval_k)
                 grounding["knowledge"] = [h["text"] for h in hits]
                 citations += [f"kb: {h['metadata'].get('title') or h['doc_id']}" for h in hits]
+                dirs = self.directives.retrieve(message, family=persona.get("family"), k=get_settings().knowledge_retrieval_k)
+                if dirs:
+                    grounding["directives"] = [d["text"] for d in dirs]
+                    citations += [f"directive: {d.get('title') or d.get('stable_id')}" for d in dirs]
             except Exception:  # noqa: BLE001
                 pass
         return grounding, citations
+
+    def _directive_intent(self, expert_id: str, persona: dict, message: str, symbol: str | None, thread_id: int) -> dict | None:
+        """Detect and apply remember/learn/forget. Context only — never risk."""
+        forget = _FORGET_RE.match(message)
+        if forget:
+            query = forget.group(2).strip()
+            if len(query) < 3:
+                return None
+            res = self.directives.forget_match(query, symbol)
+            if res:
+                return {"op": "forget", "stable_id": res["stable_id"],
+                        "answer": f'Forgotten: "{res["title"]}" (directive {res["stable_id"]} retired).'}
+            return {"op": "forget", "answer": f'No directive matched "{query[:80]}" to forget.'}
+
+        remember = _REMEMBER_RE.match(message)
+        if remember:
+            text = remember.group(3).strip()
+            if len(text) < 4:
+                return None
+            fam = persona.get("family") if persona.get("family") in _FAMILIES else None
+            title = re.split(r"(?<=[.!?])\s", text)[0][:80]
+            d = self.directives.upsert(
+                title=title, rule=text, expert=expert_id, author="human",
+                symbol=symbol, family=fam, source_thread=thread_id,
+            )
+            verb = "Learned" if d.get("created") else "Updated"
+            scope_txt = f" on {symbol}" if symbol else ""
+            return {"op": "remember", "stable_id": d["stable_id"],
+                    "answer": (f"{verb} and saved as directive `{d['stable_id']}`. I'll apply this in "
+                               f"future reasoning{scope_txt}. (Context only — this does not change risk "
+                               f"limits or position sizing.)")}
+        return None
 
     @staticmethod
     def _build_user_message(message: str, grounding: dict, info: str | None) -> str:

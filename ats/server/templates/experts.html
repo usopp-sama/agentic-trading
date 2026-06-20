@@ -78,6 +78,7 @@
       <div class="tab sel" data-tab="chat">Chat</div>
       <div class="tab" data-tab="debate">Debate</div>
       <div class="tab" data-tab="theses">Theses</div>
+      <div class="tab" data-tab="directives">Directives</div>
     </div>
 
     <!-- CHAT -->
@@ -124,6 +125,35 @@
       </div>
       <div id="thOut"></div>
     </div>
+
+    <!-- DIRECTIVES -->
+    <div class="view" id="view-directives">
+      <div class="hint" style="margin-bottom:10px">
+        Self-evolving expert knowledge. Add a rule here, or just tell an expert in Chat:
+        &ldquo;remember that &hellip;&rdquo; / &ldquo;forget &hellip;&rdquo;. Directives ground future
+        reasoning &mdash; they never change risk limits or position sizing.
+      </div>
+      <div class="row" style="margin-bottom:8px;flex-wrap:wrap">
+        <input id="dirTitle" placeholder="Short title" style="flex:1;min-width:160px">
+        <input id="dirSymbol" placeholder="Symbol (optional)" style="width:150px">
+        <select id="dirFamily">
+          <option value="">All families</option>
+          <option value="A">A - Market quant</option>
+          <option value="B">B - Macro pillars</option>
+          <option value="C">C - Instruments</option>
+          <option value="RISK">Risk</option>
+        </select>
+      </div>
+      <div class="row" style="margin-bottom:8px">
+        <textarea id="dirRule" rows="2" placeholder="The rule, e.g. 'For OMCs, treat a crude spike >5% as a margin headwind.'" style="flex:1"></textarea>
+      </div>
+      <div class="row" style="margin-bottom:12px">
+        <button id="dirAdd">Add directive</button>
+        <button class="ghost" id="dirRefresh">Refresh</button>
+        <span id="dirHint" class="hint"></span>
+      </div>
+      <div id="dirOut"></div>
+    </div>
   </main>
 </div>
 
@@ -131,6 +161,7 @@
 const api = {
   async get(u){ const r = await fetch(u); if(!r.ok) throw new Error(await r.text()); return r.json(); },
   async post(u,b){ const r = await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}); if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail||r.statusText); return r.json(); },
+  async del(u){ const r = await fetch(u,{method:'DELETE'}); if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail||r.statusText); return r.json(); },
 };
 function el(tag, props, kids){
   const e = document.createElement(tag);
@@ -284,6 +315,46 @@ async function loadTheses(){
   }catch(e){ out.textContent='[error] '+e.message; }
 }
 
+// directives
+async function loadDirectives(){
+  const out=document.getElementById('dirOut');
+  try{
+    const r=await api.get('/api/experts/directives'); out.textContent='';
+    if(!r.directives.length){ out.appendChild(el('div',{class:'hint',text:'No directives yet. Add one above, or tell an expert "remember that ...".'})); return; }
+    r.directives.forEach(d=>{
+      const card=el('div',{class:'card'});
+      const head=el('div',{class:'row'},[
+        el('b',{text:d.title||d.stable_id}),
+        el('span',{class:'stance', text:d.symbol||d.scope||'global'}),
+        el('span',{class:'hint', text:d.family?('fam '+d.family):'all families'}),
+        el('span',{class:'hint', text:d.level||''}),
+      ]);
+      const forget=el('button',{class:'ghost',text:'Forget'});
+      forget.onclick=async()=>{ try{ await api.del('/api/experts/directives/'+encodeURIComponent(d.stable_id)); loadDirectives(); }catch(e){ alert(e.message); } };
+      head.appendChild(forget);
+      card.appendChild(head);
+      card.appendChild(el('div',{text:d.rule}));
+      card.appendChild(el('div',{class:'hint',text:d.stable_id+' \u00b7 by '+(d.author||'?')}));
+      out.appendChild(card);
+    });
+  }catch(e){ out.textContent='Error: '+e.message; }
+}
+document.getElementById('dirAdd').onclick=async()=>{
+  const title=document.getElementById('dirTitle').value.trim();
+  const rule=document.getElementById('dirRule').value.trim();
+  const hint=document.getElementById('dirHint');
+  if(!title||!rule){ hint.textContent='Title and rule required.'; return; }
+  hint.textContent='Saving...';
+  try{
+    await api.post('/api/experts/directives',{title, rule,
+      symbol:document.getElementById('dirSymbol').value.trim()||null,
+      family:document.getElementById('dirFamily').value||null});
+    document.getElementById('dirTitle').value=''; document.getElementById('dirRule').value='';
+    hint.textContent=''; loadDirectives();
+  }catch(e){ hint.textContent='Error: '+e.message; }
+};
+document.getElementById('dirRefresh').onclick=loadDirectives;
+
 // tab switching
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('sel'));
@@ -291,6 +362,7 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   t.classList.add('sel');
   document.getElementById('view-'+t.dataset.tab).classList.add('sel');
   if(t.dataset.tab==='theses') loadTheses();
+  if(t.dataset.tab==='directives') loadDirectives();
 });
 document.getElementById('chatSend').onclick=sendChat;
 document.getElementById('chatMsg').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); sendChat(); }});

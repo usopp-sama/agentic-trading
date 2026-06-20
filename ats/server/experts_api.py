@@ -35,6 +35,15 @@ class DebateBody(BaseModel):
     rounds: int | None = Field(default=None, ge=0, le=4)
 
 
+class DirectiveBody(BaseModel):
+    title: str = Field(min_length=1, max_length=256)
+    rule: str = Field(min_length=1, max_length=_INFO_MAX)
+    symbol: str | None = Field(default=None, max_length=_SYMBOL_MAX)
+    family: str | None = Field(default=None, max_length=8)
+    level: str = Field(default="L2", max_length=4)
+    expert: str = Field(default="human", max_length=64)
+
+
 def _agents(request: Request):
     orch = getattr(request.app.state, "orchestrator", None)
     agents = orch.get("agents") if orch else None
@@ -113,3 +122,25 @@ def thesis_history(thesis_id: int, request: Request) -> dict:
 @router.post("/debate")
 async def debate(body: DebateBody, request: Request) -> dict:
     return await _agents(request).debate(body.symbol.strip().upper(), body.rounds)
+
+
+@router.get("/directives")
+def list_directives(request: Request, symbol: str | None = None, family: str | None = None) -> dict:
+    sym = symbol.strip().upper() if symbol else None
+    return {"directives": _console(request).list_directives(sym, family)}
+
+
+@router.post("/directives")
+def add_directive(body: DirectiveBody, request: Request) -> dict:
+    sym = body.symbol.strip().upper() if body.symbol else None
+    return _console(request).add_directive(
+        title=body.title, rule=body.rule, symbol=sym, family=body.family, level=body.level, expert=body.expert
+    )
+
+
+@router.delete("/directives/{stable_id}")
+def forget_directive(stable_id: str, request: Request) -> dict:
+    ok = _console(request).forget_directive(stable_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="directive not found")
+    return {"forgotten": stable_id}

@@ -12,6 +12,7 @@ import math
 
 from ats.core.config import get_settings
 from ats.services.agents import tools
+from ats.services.agents.directives import get_directive_store
 from ats.services.agents.knowledge_base import get_knowledge_base, keywords
 from ats.services.agents.tools import Providers
 
@@ -44,6 +45,7 @@ class ContextAssembler:
 
         news_texts = [n["text"][:120] for n in news]
         knowledge = self._retrieve_knowledge(persona, symbol, news_texts)
+        directives = self._retrieve_directives(persona, symbol, news_texts)
         evidence = {
             "technical": tech,
             "volume": vol,
@@ -51,6 +53,7 @@ class ContextAssembler:
             "news": news_texts,
             "profile": {k: profile.get(k) for k in ("sector", "themes") if k in profile},
             "knowledge": [k["text"] for k in knowledge],
+            "directives": [d["text"] for d in directives],
         }
         evidence_count = sum(1 for v in (tech, vol, sent, news, profile) if v)
 
@@ -63,6 +66,7 @@ class ContextAssembler:
             "risks": self._risks(tech, sent),
             "news": news_texts,
             "knowledge": knowledge,
+            "directives": directives,
         }
 
     def _retrieve_knowledge(self, persona: dict, symbol: str, news_texts: list[str]) -> list[dict]:
@@ -87,6 +91,22 @@ class ContextAssembler:
             k = get_settings().knowledge_retrieval_k
             return kb.retrieve(query, family=persona.get("family"), k=k)
         except Exception:  # noqa: BLE001 - grounding is best-effort, never fatal
+            return []
+
+    def _retrieve_directives(self, persona: dict, symbol: str, news_texts: list[str]) -> list[dict]:
+        """Pull expert-authored knowledge directives relevant to this symbol.
+
+        Context only: directives sharpen reasoning, they never change risk or
+        sizing (that path is the Rule engine + guardrails).
+        """
+        try:
+            store = get_directive_store()
+            query = " ".join(
+                [symbol, " ".join(persona.get("inputs", [])), keywords(" ".join(news_texts), limit=8)]
+            ).strip()
+            return store.retrieve(query, symbol=symbol, family=persona.get("family"),
+                                  k=get_settings().knowledge_retrieval_k)
+        except Exception:  # noqa: BLE001
             return []
 
     def _signal(self, name, symbol, tech, vol, sent, profile) -> float | None:

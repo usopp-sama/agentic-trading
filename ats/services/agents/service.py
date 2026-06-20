@@ -22,6 +22,7 @@ from ats.core.models import SmeTrackRecord
 from ats.core.schemas import Opinion, ProposedPosition
 from ats.services.agents.cio import CIO
 from ats.services.agents.console import ExpertConsole
+from ats.services.agents.directives import get_directive_store
 from ats.services.agents.knowledge_base import get_knowledge_base
 from ats.services.agents.llm_client import build_llm_client
 from ats.services.agents.registry import families, load_personas
@@ -62,8 +63,10 @@ class AgentService:
         self._symbol_personas = [p for p in self._personas if p["scope"] == "symbol"]
         self._macro_personas = [p for p in self._personas if p["scope"] == "market"]
 
-        # Domain knowledge base for grounding (built-in primers + user docs).
+        # Domain knowledge base for grounding (built-in primers + user docs)
+        # and self-evolving expert directives (context only).
         get_knowledge_base().ingest_all(providers.knowledge)
+        get_directive_store().load_all()
 
         # Interactive expert console (tiered routing: stronger model for CIO).
         self._console = ExpertConsole(

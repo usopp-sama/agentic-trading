@@ -41,6 +41,12 @@ _FAMILY_PREFIX = {
 
 _MAX_CHUNK_CHARS = 900
 
+# Reliability tiers (0-100) scale retrieval scores so trusted sources outrank
+# generic ones. Directives (authored rules) sit at 100 (see directives.py).
+_RELIABILITY_BUILTIN = 90   # shipped domain primers
+_RELIABILITY_USER = 95      # operator-supplied notes/research/filings
+_RELIABILITY_PROFILE = 88   # generated instrument profiles
+
 
 def _family_for(filename: str) -> str:
     stem = filename.lower()
@@ -106,12 +112,20 @@ class KnowledgeBase:
                 log.warning("kb_file_error", extra={"file": path.name, "error": str(exc)})
                 continue
             family = _family_for(path.stem)
+            reliability = _RELIABILITY_BUILTIN if builtin else _RELIABILITY_USER
             for i, (heading, body) in enumerate(_chunk(text)):
                 doc_id = f"kb:{path.stem}:{i}"
                 self.store.add(
                     doc_id,
                     f"{heading}\n{body}" if heading else body,
-                    {"kind": "kb", "family": family, "source": path.stem, "title": heading, "builtin": builtin},
+                    {
+                        "kind": "kb",
+                        "family": family,
+                        "source": path.stem,
+                        "title": heading,
+                        "builtin": builtin,
+                        "reliability": reliability,
+                    },
                 )
                 self._count += 1
 
@@ -126,7 +140,14 @@ class KnowledgeBase:
                 self.store.add(
                     f"kb:profile:{symbol}",
                     text,
-                    {"kind": "kb", "family": "C", "source": "profiles", "title": symbol, "tickers": [symbol]},
+                    {
+                        "kind": "kb",
+                        "family": "C",
+                        "source": "profiles",
+                        "title": symbol,
+                        "tickers": [symbol],
+                        "reliability": _RELIABILITY_PROFILE,
+                    },
                 )
                 self._count += 1
 

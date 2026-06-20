@@ -365,6 +365,38 @@ class ThesisRevision(Base):
     author: Mapped[str] = mapped_column(String(32), default="expert")  # expert/human
 
 
+class KnowledgeDirective(Base):
+    """A self-evolving, expert-authored knowledge rule (SMX-style directive).
+
+    Distinct from ``Rule`` (which governs RISK/sizing behaviour): a directive is
+    *context only* — durable domain guidance an expert learns and writes back
+    ("remember/learn/forget"), retrieved into future reasoning so the expert
+    gets sharper over time. Directives NEVER change risk limits or order sizing;
+    that path stays behind the immutable guardrails + human approval.
+
+    Indexed into the vector store at reliability 100 so authored rules outrank
+    generic prose during retrieval. Organised L0-L4 (foundational -> edge case).
+    """
+
+    __tablename__ = "knowledge_directives"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    stable_id: Mapped[str] = mapped_column(String(96), unique=True, index=True)
+    expert: Mapped[str] = mapped_column(String(64), default="", index=True)  # owning family/sme or 'human'
+    scope: Mapped[str] = mapped_column(String(16), default="global")  # global/symbol/sector
+    symbol: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    family: Mapped[str | None] = mapped_column(String(16), nullable=True)  # A/B/C/RISK or None=all
+    level: Mapped[str] = mapped_column(String(4), default="L2")  # L0..L4
+    title: Mapped[str] = mapped_column(String(256), default="")
+    rule: Mapped[str] = mapped_column(Text, default="")
+    category: Mapped[str] = mapped_column(String(48), default="operational")
+    reliability: Mapped[int] = mapped_column(Integer, default=100)
+    status: Mapped[str] = mapped_column(String(16), default="active", index=True)  # active/retired
+    author: Mapped[str] = mapped_column(String(32), default="human")  # expert/human
+    source_thread: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
 class KvState(Base):
     """Small key/value table for runtime state (kill switch, mode, etc.)."""
 
