@@ -122,13 +122,37 @@ class VolPremiumService:
         self._last_pnl_day: date | None = None
         self._prev_equity: float | None = None
 
+    _STATE_KEY = "vol_premium:book"
+
     async def start(self, ctx) -> None:
         if not get_settings().vol_premium_enabled:
             log.info("vol_premium_disabled")
             return
         self._bus = ctx.bus
         self._regime = ctx.orchestrator.get("regime")
+        # Reload any open spreads + sleeve P&L state so a restart does not drop
+        # live option positions or double-count daily P&L.
+        self._restore_state()
         ctx.bus.subscribe(Topic.OPTION_CHAIN, self._on_chain)
+
+    def _restore_state(self) -> None:
+        saved = state.get_kv(self._STATE_KEY, {})
+        if not saved:
+            return
+        try:
+            self.book.load_state(saved)
+            pd = saved.get("last_pnl_day")
+            self._last_pnl_day = date.fromisoformat(pd) if pd else None
+            self._prev_equity = saved.get("prev_equity")
+            log.info("vol_premium_state_restored", extra={"open": len(self.book.open_spreads())})
+        except Exception as exc:  # noqa: BLE001 - corrupt state must not block boot
+            log.warning("vol_premium_state_restore_failed", extra={"error": str(exc)})
+
+    def _persist_state(self) -> None:
+        payload = self.book.export_state()
+        payload["prev_equity"] = self._prev_equity
+        payload["last_pnl_day"] = self._last_pnl_day.isoformat() if self._last_pnl_day else None
+        state.set_kv(self._STATE_KEY, payload)
 
     # --- the cycle: every option-chain snapshot drives the sleeve --------------
     async def _on_chain(self, evt) -> None:
@@ -174,6 +198,9 @@ class VolPremiumService:
 
         # 4) Daily sleeve P&L row.
         self._record_daily(today, spot, iv, t_years)
+
+        # 5) Persist the book + sleeve state so a restart resumes cleanly.
+        self._persist_state()
 
     def _open_condor(self, snap: dict, spot: float, iv: float, expiry: date, t_years: float) -> None:
         settings = get_settings()

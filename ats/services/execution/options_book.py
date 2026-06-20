@@ -201,3 +201,39 @@ class OptionsPaperBook:
             if s.spread_id == spread_id:
                 return s
         raise KeyError(f"no open spread {spread_id}")
+
+    # --- restart-safe persistence -------------------------------------------
+    def export_state(self) -> dict:
+        """JSON-serializable snapshot of the whole book (for KvState)."""
+        return {"spreads": [_spread_to_dict(s) for s in self.spreads]}
+
+    def load_state(self, data: dict) -> None:
+        """Rehydrate spreads from ``export_state`` output; resets the id counter
+        past the highest restored id so new spreads never collide."""
+        spreads = [_spread_from_dict(d) for d in (data or {}).get("spreads", [])]
+        self.spreads = spreads
+        max_id = max((s.spread_id for s in spreads), default=0)
+        self._ids = itertools.count(max_id + 1)
+
+
+def _spread_to_dict(s: CreditSpread) -> dict:
+    return {
+        "spread_id": s.spread_id, "symbol": s.symbol, "kind": s.kind,
+        "short_strike": s.short_strike, "long_strike": s.long_strike,
+        "expiry": s.expiry.isoformat(), "lots": s.lots, "lot_size": s.lot_size,
+        "entry_credit": s.entry_credit, "open_fees": s.open_fees,
+        "status": s.status, "exit_debit": s.exit_debit,
+        "close_fees": s.close_fees, "close_reason": s.close_reason,
+    }
+
+
+def _spread_from_dict(d: dict) -> CreditSpread:
+    return CreditSpread(
+        spread_id=int(d["spread_id"]), symbol=d["symbol"], kind=d["kind"],
+        short_strike=float(d["short_strike"]), long_strike=float(d["long_strike"]),
+        expiry=date.fromisoformat(d["expiry"]), lots=int(d["lots"]),
+        lot_size=int(d["lot_size"]), entry_credit=float(d["entry_credit"]),
+        open_fees=float(d.get("open_fees", 0.0)), status=d.get("status", "open"),
+        exit_debit=(None if d.get("exit_debit") is None else float(d["exit_debit"])),
+        close_fees=float(d.get("close_fees", 0.0)), close_reason=d.get("close_reason", ""),
+    )

@@ -30,6 +30,34 @@ def _open_call_spread(book: OptionsPaperBook, credit: float = 30.0):
     )
 
 
+# --- restart-safe persistence -----------------------------------------------------
+def test_book_state_round_trips():
+    book = _book()
+    open_s = _open_call_spread(book, credit=30.0)
+    # Open a second, then close it, so we cover both open and closed spreads.
+    closed_s = book.open_spread(
+        "NIFTY", "PE", short_strike=24000, long_strike=23800,
+        expiry=EXPIRY, lots=1, lot_size=75, entry_credit=20.0,
+    )
+    book.close_spread(closed_s.spread_id, exit_debit=5.0, reason="profit_target")
+
+    state = book.export_state()
+    restored = _book()
+    restored.load_state(state)
+
+    assert len(restored.spreads) == 2
+    assert len(restored.open_spreads()) == 1
+    assert restored.open_spreads()[0].spread_id == open_s.spread_id
+    assert restored.margin_reserved() == pytest.approx(book.margin_reserved())
+    assert restored.realized_pnl() == pytest.approx(book.realized_pnl())
+    # New spreads opened after restore must not collide with restored ids.
+    fresh = restored.open_spread(
+        "NIFTY", "CE", short_strike=25000, long_strike=25200,
+        expiry=EXPIRY, lots=1, lot_size=75, entry_credit=30.0,
+    )
+    assert fresh.spread_id > max(s.spread_id for s in book.spreads)
+
+
 # --- book mechanics ---------------------------------------------------------------
 def test_margin_reserves_max_loss():
     book = _book()

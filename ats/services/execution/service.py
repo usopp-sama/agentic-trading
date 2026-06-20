@@ -11,12 +11,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ats.core.db import session_scope
 from ats.core.events import EventBus, Topic
 from ats.core.logging import get_logger
-from ats.core.models import Approval, Decision, PnlDaily
+from ats.core.models import Approval, Decision, Fill, Order, PnlDaily
 from ats.core import state
 from ats.services.execution.autonomy import resolve_route
 from ats.services.execution.kite_adapter import KiteAdapter
@@ -56,10 +56,19 @@ class ExecutionService:
         self._peak_equity = 0.0
         self._pending: dict[int, Draft] = {}
 
+    @property
+    def _peak_key(self) -> str:
+        return f"risk:peak_equity:{self.account}"
+
     async def start(self, ctx) -> None:
         self._bus = ctx.bus
         self._md = ctx.orchestrator.get("market_data")
         self.broker.set_price_fn(self.price_of)
+        # Recover peak equity so the drawdown-based daily-loss kill switch is
+        # not silently reset to 0 by a mid-month restart.
+        self._peak_equity = float(state.get_kv(self._peak_key, {"peak": 0.0}).get("peak", 0.0))
+        if self._peak_equity > 0:
+            log.info("peak_equity_restored", extra={"peak": self._peak_equity})
         ctx.bus.subscribe(Topic.DECISION, self._on_decision)
 
         from ats.core.config import get_settings
@@ -212,10 +221,24 @@ class ExecutionService:
     def record_equity(self) -> dict:
         snap = self.get_snapshot()
         equity = snap["equity"]
+        prev_peak = self._peak_equity
         self._peak_equity = max(self._peak_equity, equity)
+        if self._peak_equity > prev_peak:
+            # Persist new high-water marks so drawdown survives a restart.
+            state.set_kv(self._peak_key, {"peak": self._peak_equity})
         drawdown = (equity / self._peak_equity - 1.0) if self._peak_equity > 0 else 0.0
+        net = snap["realized_pnl"] + snap["unrealized_pnl"]
         today = date.today()
         with session_scope() as s:
+            # Cumulative fees paid by this account (for the gross/net split).
+            fees = float(
+                s.execute(
+                    select(func.coalesce(func.sum(Fill.fees), 0.0))
+                    .join(Order, Fill.order_id == Order.id)
+                    .where(Order.account == self.account)
+                ).scalar_one()
+                or 0.0
+            )
             row = s.execute(
                 select(PnlDaily).where(
                     PnlDaily.account == self.account, PnlDaily.day == today
@@ -225,6 +248,9 @@ class ExecutionService:
                 row = PnlDaily(account=self.account, day=today)
                 s.add(row)
             row.equity = equity
-            row.net = snap["realized_pnl"] + snap["unrealized_pnl"]
+            row.net = net
+            # Complete the daily accounting: gross (pre-fee) and fees to date.
+            row.fees = round(fees, 2)
+            row.gross = round(net + fees, 2)
             row.drawdown = round(drawdown, 4)
         return {"equity": equity, "drawdown": round(drawdown, 4)}

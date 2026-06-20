@@ -38,6 +38,18 @@ def _set_kv(key: str, value: dict) -> None:
             row.value = value
 
 
+# --- Generic restart-safe state (public) ------------------------------------
+# Services use these to persist small bits of runtime state (peak equity, the
+# options book, etc.) so a mid-run restart does not silently reset risk limits.
+
+def get_kv(key: str, default: dict | None = None) -> dict:
+    return _get_kv(key, default or {})
+
+
+def set_kv(key: str, value: dict) -> None:
+    _set_kv(key, value)
+
+
 # --- Kill switch -------------------------------------------------------------
 
 def is_killed() -> bool:
