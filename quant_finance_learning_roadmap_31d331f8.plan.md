@@ -21,8 +21,8 @@ todos:
     content: Study time series analysis, stochastic calculus, market microstructure, derivatives pricing (Months 3-6). Read Hull's textbook.
     status: pending
   - id: tool-phase4
-    content: "Add intelligence layer: FinBERT sentiment analysis on news, macro event tracking, web dashboard with Streamlit/Dash."
-    status: pending
+    content: "Add intelligence layer: FinBERT sentiment analysis on news, macro event tracking, web dashboard with Streamlit/Dash. Done in repo (agentic SME layer, see Part 14): sentiment model + in-memory RAG vector store; an SME roster spanning economic pillars (macro/geopolitics/rates) and instruments (companies/ETFs), each a persona-driven LLM expert; a CIO that aggregates weighted SME opinions into a netted proposal; a per-domain RAG knowledge base that grounds every expert; hybrid BM25+vector reliability-weighted retrieval; self-evolving context-only directives (remember/learn/forget); and an interactive expert console with living position theses and multi-expert debate. Pending: FinBERT swap (current sentiment is lexical), richer macro-event calendar, and merging the multi-page dashboard that lives on the main line."
+    status: in_progress
   - id: competition-prep
     content: Solve Jane Street monthly puzzles, register for WorldQuant Brain, enter IMC Prosperity, prepare for ETC and Two Sigma competitions.
     status: pending
@@ -677,3 +677,30 @@ The backtest-to-live gap is where most retail systems die. This checklist is the
 8. **Month 12+**: Climb the autonomy ladder one level at a time as live results earn it. Add the factor sleeve and, only after mastering options, a small defined-risk vol premium sleeve.
 
 The engineering mindset — systematic thinking, debugging, building systems — is exactly what quant finance rewards. The biggest trap to avoid: **overfitting**. A model that perfectly predicts the past is useless. Always validate out-of-sample (Part 12 is the full defense). And remember the two governing equations: the portfolio of uncorrelated strategies is the edge (Part 7), and profit maximization = survival × compounding × cost control (Part 9).
+
+---
+
+## Part 14: Agentic SME Intelligence Layer (implemented)
+
+The strategy library (Part 7) decides *mechanically*; this layer adds *reasoning*. It is the "subject matter expert" idea made real: a panel of persona-driven LLM experts that read the same grounded data, argue, and feed a single decision-maker — never touching the broker, always behind the Part 8/9 risk machinery.
+
+### 14.1 Roster and aggregation
+- **SME roster** — experts organised in families: **A** market/quant, **B** macro pillars (rates, geopolitics, trade, commodities), **C** instruments (company/ETF/fund profiles), and **RISK**. Each SME is a YAML persona (scope, inputs, signal weights, horizon, system prompt) over a shared deterministic context assembler — not a hand-coded ruleset.
+- **CIO aggregator** — collects weighted SME opinions into one ranked, netted proposal; weights are learned from realised P&L (track record → promotion/demotion), so the panel sharpens over time.
+- **Pluggable LLM** — `MockLLMClient` (offline, deterministic, dependency-free) and `HttpLLMClient` (local Ollama or any OpenAI-compatible endpoint) behind one interface, with a generic grounded `chat()` for conversation.
+
+### 14.2 RAG knowledge base (grounding)
+- A per-domain knowledge base ingests built-in primers, operator docs, and generated instrument profiles, chunked and family-scoped, so an expert reasons from *our* curated material rather than generic model memory.
+- **Hybrid retrieval** — pure-python **BM25** keyword scoring fused with cosine over a hashing vector store (`alpha=0.7`), then scaled by per-source **reliability tiers** (authored directives 100 > operator docs 95 > primers 90 > profiles 88), so trusted sources outrank chatter. Dependency-free; upgradeable to real embeddings.
+
+### 14.3 Self-evolving directives (context only)
+- Experts accumulate durable, structured knowledge rules ("remember that … / forget …") — the highest-signal grounding, indexed at reliability 100 and retrieved into every future opinion. Symbol-scoped directives are pinned for their symbol.
+- **Safety boundary**: directives inform *reasoning only*. They never change risk limits or position sizing — that path stays exclusively with the immutable guardrails (Part 9) plus human approval. The learning loop that *does* move capital is the realised-P&L attribution and the adaptive rule engine, both guardrailed.
+
+### 14.4 Interactive console
+- A conversational surface to interrogate any expert or the CIO, with persistent threads and memory, live-data + knowledge grounding, and citations.
+- **Living theses** — each position carries a thesis that an expert can revisit and revise, with an auditable revision history (decision evolution, not a frozen call).
+- **Multi-expert debate** — experts opine, optionally rebut after seeing peers, and the CIO synthesises a final proposal with a transcript.
+
+### 14.5 Design lineage (SMX alignment)
+This layer independently converged on, and then borrowed from, the SMX "subject-matter expert" pattern (`docs/smx.md`): make a stock LLM an expert via *engineered context + enforced process + persistent memory*, not fine-tuning. We adopted its hybrid+reliability retrieval and self-evolving directive memory; we deliberately diverge on one point — because our experts move money, authored knowledge is **context-only** and outcome-graded, never an unchecked write into trading behaviour. Natural next steps from SMX: per-question-type methodology injection and procedural "skills".
