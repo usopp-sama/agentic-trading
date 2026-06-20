@@ -1,77 +1,55 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Expert Console — Agentic Trading</title>
+{% extends "base.html" %}
+{% block title %}Experts{% endblock %}
+{% block content %}
 <style>
-  :root{
-    --bg:#0b0f17; --panel:#121826; --panel2:#0e1420; --line:#1f2a3a;
-    --ink:#e6edf6; --mut:#8aa0bd; --acc:#4da3ff; --good:#34d399; --bad:#f87171;
-    --warn:#fbbf24; --chip:#1a2436;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-  header{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--panel2)}
-  header h1{font-size:16px;margin:0;font-weight:600}
-  header a{color:var(--mut);text-decoration:none;font-size:13px}
-  header a:hover{color:var(--acc)}
-  .badge{margin-left:auto;font-size:12px;padding:3px 10px;border-radius:999px;background:var(--chip);color:var(--mut)}
-  .badge.real{color:var(--good)} .badge.mock{color:var(--warn)}
-  .wrap{display:grid;grid-template-columns:280px 1fr;height:calc(100vh - 53px)}
-  aside{border-right:1px solid var(--line);overflow:auto;background:var(--panel2)}
-  .fam{padding:10px 14px 4px;color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
-  .exp{padding:8px 14px;cursor:pointer;border-left:3px solid transparent}
-  .exp:hover{background:var(--panel)}
-  .exp.sel{background:var(--panel);border-left-color:var(--acc)}
-  .exp .nm{font-weight:500}
-  .exp .meta{color:var(--mut);font-size:12px}
-  main{display:flex;flex-direction:column;overflow:hidden}
-  .tabs{display:flex;gap:4px;padding:10px 16px 0;border-bottom:1px solid var(--line)}
-  .tab{padding:8px 16px;cursor:pointer;color:var(--mut);border-bottom:2px solid transparent}
-  .tab.sel{color:var(--ink);border-bottom-color:var(--acc)}
-  .view{flex:1;overflow:auto;padding:16px;display:none}
-  .view.sel{display:block}
-  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-  input,textarea,select,button{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
-  textarea{width:100%;resize:vertical;min-height:64px}
-  input.sym{width:120px;text-transform:uppercase}
-  input.msg{flex:1;min-width:220px}
-  button{cursor:pointer;background:var(--acc);border-color:var(--acc);color:#04122a;font-weight:600}
-  button.ghost{background:var(--chip);border-color:var(--line);color:var(--ink);font-weight:500}
-  button:disabled{opacity:.5;cursor:default}
-  .msg-list{display:flex;flex-direction:column;gap:12px;margin-bottom:14px}
-  .bubble{max-width:82%;padding:10px 13px;border-radius:12px;white-space:pre-wrap;word-wrap:break-word}
-  .bubble.user{align-self:flex-end;background:#16314f}
-  .bubble.assistant{align-self:flex-start;background:var(--panel);border:1px solid var(--line)}
-  .cites{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
-  .chip{font-size:11px;color:var(--mut);background:var(--chip);padding:2px 8px;border-radius:999px}
-  .hint{color:var(--mut);font-size:12px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
-  .stance{font-weight:700;padding:2px 8px;border-radius:6px;font-size:12px}
-  .s-strong_buy,.s-buy{background:#0f2e22;color:var(--good)}
-  .s-sell,.s-strong_sell{background:#3a1620;color:var(--bad)}
-  .s-neutral{background:var(--chip);color:var(--mut)}
-  .conv{height:6px;background:var(--chip);border-radius:4px;overflow:hidden;margin-top:6px}
-  .conv > i{display:block;height:100%;background:var(--acc)}
-  .head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-  .grow{flex:1}
-  .proposal{border:1px solid var(--acc)}
-  details{margin-top:8px}
-  summary{cursor:pointer;color:var(--mut)}
-  .rev{border-left:2px solid var(--line);padding:6px 0 6px 12px;margin:6px 0}
-  .act{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
-  .act.flip,.act.exit{color:var(--bad)} .act.upgrade,.act.open{color:var(--good)} .act.downgrade{color:var(--warn)} .act.reaffirm{color:var(--mut)}
-  .composer{border-top:1px solid var(--line);padding:12px 16px;background:var(--panel2)}
+  #xp{display:grid;grid-template-columns:260px 1fr;height:calc(100vh - 53px)}
+  #xp aside{border-right:1px solid var(--border);overflow:auto;background:var(--panel)}
+  #xp .fam{padding:12px 14px 4px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+  #xp .exp{padding:8px 14px;cursor:pointer;border-left:3px solid transparent}
+  #xp .exp:hover{background:var(--panel2)}
+  #xp .exp.sel{background:var(--panel2);border-left-color:var(--blue)}
+  #xp .exp .nm{font-weight:600}
+  #xp .exp .meta{color:var(--muted);font-size:12px}
+  #xp main{display:flex;flex-direction:column;overflow:hidden;min-width:0}
+  #xp .tabs{display:flex;gap:4px;padding:10px 16px 0;border-bottom:1px solid var(--border);align-items:center}
+  #xp .tab{padding:8px 16px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;font-weight:600}
+  #xp .tab.sel{color:var(--text);border-bottom-color:var(--blue)}
+  #xp .xbadge{margin-left:auto;font-size:12px;padding:3px 10px;border-radius:999px;background:var(--panel2);color:var(--muted)}
+  #xp .xbadge.real{color:var(--green)} #xp .xbadge.mock{color:var(--amber)}
+  #xp .view{flex:1;overflow:auto;padding:16px;display:none}
+  #xp .view.sel{display:block}
+  #xp .xrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  #xp textarea{width:100%;resize:vertical;min-height:64px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font:inherit}
+  #xp input{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font:inherit}
+  #xp input.sym{width:120px;text-transform:uppercase}
+  #xp input.msg{flex:1;min-width:220px}
+  #xp .card{margin-bottom:10px}
+  #xp .msg-list{display:flex;flex-direction:column;gap:12px;margin-bottom:14px}
+  #xp .bubble{max-width:82%;padding:10px 13px;border-radius:12px;white-space:pre-wrap;word-wrap:break-word}
+  #xp .bubble.user{align-self:flex-end;background:#16314f}
+  #xp .bubble.assistant{align-self:flex-start;background:var(--panel2);border:1px solid var(--border)}
+  #xp .cites{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
+  #xp .chip{display:inline-block;font-size:11px;color:var(--muted);background:var(--panel2);padding:2px 8px;border-radius:999px;margin:0}
+  #xp .stance{font-weight:700;padding:2px 8px;border-radius:6px;font-size:12px}
+  #xp .s-strong_buy,#xp .s-buy{background:rgba(46,194,107,.15);color:var(--green)}
+  #xp .s-sell,#xp .s-strong_sell{background:rgba(255,93,93,.15);color:var(--red)}
+  #xp .s-neutral{background:var(--panel2);color:var(--muted)}
+  #xp .conv{height:6px;background:var(--panel2);border-radius:4px;overflow:hidden;margin-top:6px}
+  #xp .conv>i{display:block;height:100%;background:var(--blue)}
+  #xp .head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  #xp .grow{flex:1}
+  #xp .proposal{border:1px solid var(--blue)}
+  #xp details{margin-top:8px} #xp summary{cursor:pointer;color:var(--muted)}
+  #xp .rev{border-left:2px solid var(--border);padding:6px 0 6px 12px;margin:6px 0}
+  #xp .act{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+  #xp .act.flip,#xp .act.exit{color:var(--red)} #xp .act.upgrade,#xp .act.open{color:var(--green)}
+  #xp .act.downgrade{color:var(--amber)} #xp .act.reaffirm{color:var(--muted)}
+  #xp .composer{border-top:1px solid var(--border);padding:12px 16px;background:var(--panel)}
+  #xp .hint{color:var(--muted);font-size:12px}
+  @media(max-width:980px){ #xp{grid-template-columns:1fr;height:auto} #xp aside{max-height:200px} }
 </style>
-</head>
-<body>
-<header>
-  <h1>Expert Console</h1>
-  <a href="/">&larr; Dashboard</a>
-  <span id="modelBadge" class="badge">…</span>
-</header>
-<div class="wrap">
+
+<div id="xp">
   <aside id="roster"></aside>
   <main>
     <div class="tabs">
@@ -79,16 +57,17 @@
       <div class="tab" data-tab="debate">Debate</div>
       <div class="tab" data-tab="theses">Theses</div>
       <div class="tab" data-tab="directives">Directives</div>
+      <span id="modelBadge" class="xbadge">…</span>
     </div>
 
     <!-- CHAT -->
     <div class="view sel" id="view-chat" style="display:flex;flex-direction:column;padding:0">
-      <div class="view sel" style="display:block;flex:1" id="chatScroll">
-        <div id="chatWho" class="hint" style="margin-bottom:8px"></div>
+      <div style="flex:1;overflow:auto;padding:16px" id="chatScroll">
+        <div id="chatWho" class="hint" style="margin-bottom:8px">Pick an expert on the left to start.</div>
         <div class="msg-list" id="chatMsgs"></div>
       </div>
       <div class="composer">
-        <div class="row">
+        <div class="xrow">
           <input class="sym" id="chatSym" placeholder="SYMBOL (opt)" />
           <input class="msg" id="chatMsg" placeholder="Ask the expert…  (Enter to send)" />
           <button id="chatSend">Send</button>
@@ -102,9 +81,9 @@
 
     <!-- DEBATE -->
     <div class="view" id="view-debate">
-      <div class="row" style="margin-bottom:12px">
+      <div class="xrow" style="margin-bottom:12px">
         <input class="sym" id="debSym" placeholder="SYMBOL" />
-        <select id="debRounds" class="ghost">
+        <select id="debRounds">
           <option value="">rebuttal: auto</option>
           <option value="0">0 (snapshot)</option>
           <option value="1">1 round</option>
@@ -119,7 +98,7 @@
 
     <!-- THESES -->
     <div class="view" id="view-theses">
-      <div class="row" style="margin-bottom:12px">
+      <div class="xrow" style="margin-bottom:12px">
         <button class="ghost" id="thRefresh">Refresh</button>
         <span class="hint">Living investment views. Revisit an expert from Chat (with a symbol) to create/update one.</span>
       </div>
@@ -133,7 +112,7 @@
         &ldquo;remember that &hellip;&rdquo; / &ldquo;forget &hellip;&rdquo;. Directives ground future
         reasoning &mdash; they never change risk limits or position sizing.
       </div>
-      <div class="row" style="margin-bottom:8px;flex-wrap:wrap">
+      <div class="xrow" style="margin-bottom:8px">
         <input id="dirTitle" placeholder="Short title" style="flex:1;min-width:160px">
         <input id="dirSymbol" placeholder="Symbol (optional)" style="width:150px">
         <select id="dirFamily">
@@ -144,10 +123,10 @@
           <option value="RISK">Risk</option>
         </select>
       </div>
-      <div class="row" style="margin-bottom:8px">
-        <textarea id="dirRule" rows="2" placeholder="The rule, e.g. 'For OMCs, treat a crude spike >5% as a margin headwind.'" style="flex:1"></textarea>
+      <div class="xrow" style="margin-bottom:8px">
+        <textarea id="dirRule" rows="2" placeholder="The rule, e.g. 'For OMCs, treat a crude spike >5% as a margin headwind.'"></textarea>
       </div>
-      <div class="row" style="margin-bottom:12px">
+      <div class="xrow" style="margin-bottom:12px">
         <button id="dirAdd">Add directive</button>
         <button class="ghost" id="dirRefresh">Refresh</button>
         <span id="dirHint" class="hint"></span>
@@ -156,13 +135,16 @@
     </div>
   </main>
 </div>
+{% endblock %}
 
+{% block script %}
 <script>
 const api = {
   async get(u){ const r = await fetch(u); if(!r.ok) throw new Error(await r.text()); return r.json(); },
   async post(u,b){ const r = await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}); if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail||r.statusText); return r.json(); },
   async del(u){ const r = await fetch(u,{method:'DELETE'}); if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail||r.statusText); return r.json(); },
 };
+const root = document.getElementById('xp');
 function el(tag, props, kids){
   const e = document.createElement(tag);
   if(props) for(const k in props){ if(k==='class') e.className=props[k]; else if(k==='text') e.textContent=props[k]; else e.setAttribute(k,props[k]); }
@@ -172,17 +154,14 @@ function el(tag, props, kids){
 function stancePill(s){ return el('span',{class:'stance s-'+s, text:(s||'').replace('_',' ')}); }
 function convBar(c){ const b=el('div',{class:'conv'}); const i=el('i'); i.style.width=Math.round((c||0)*100)+'%'; b.appendChild(i); return b; }
 
-let selected = null;       // expert id
-let selectedName = '';
-let threadId = null;       // current chat thread
-let experts = [];
+let selected = null, selectedName = '', threadId = null, experts = [];
 
 async function loadState(){
   try{ const st = await api.get('/api/state');
     const b = document.getElementById('modelBadge');
     const real = st.llm_provider && st.llm_provider!=='mock';
     b.textContent = real ? ('LLM: '+st.llm_provider) : 'LLM: heuristic (mock)';
-    b.className = 'badge '+(real?'real':'mock');
+    b.className = 'xbadge '+(real?'real':'mock');
   }catch(e){}
 }
 
@@ -191,12 +170,12 @@ async function loadRoster(){
   experts = data.experts;
   const byFam = {};
   experts.forEach(e=>{ (byFam[e.family||'?']=byFam[e.family||'?']||[]).push(e); });
-  const root = document.getElementById('roster'); root.textContent='';
+  const aside = document.getElementById('roster'); aside.textContent='';
   const order = ['CIO','A','B','C','RISK'];
   const names = {A:'Market / Quant',B:'Macro Pillars',C:'Instruments',RISK:'Risk',CIO:'Synthesis'};
   order.concat(Object.keys(byFam).filter(f=>!order.includes(f))).forEach(fam=>{
     if(!byFam[fam]) return;
-    root.appendChild(el('div',{class:'fam',text:names[fam]||fam}));
+    aside.appendChild(el('div',{class:'fam',text:names[fam]||fam}));
     byFam[fam].forEach(e=>{
       const meta = e.hit_rate!=null ? ('hit '+Math.round(e.hit_rate*100)+'% · n='+(e.n||0)) : (e.scope||'');
       const node = el('div',{class:'exp',title:(e.inputs||[]).join(', ')},[
@@ -204,15 +183,14 @@ async function loadRoster(){
         el('div',{class:'meta',text:meta}),
       ]);
       node.onclick=()=>selectExpert(e.id,e.name,node);
-      e._node=node;
-      root.appendChild(node);
+      aside.appendChild(node);
     });
   });
 }
 
 function selectExpert(id,name,node){
   selected=id; selectedName=name; threadId=null;
-  document.querySelectorAll('.exp').forEach(n=>n.classList.remove('sel'));
+  root.querySelectorAll('.exp').forEach(n=>n.classList.remove('sel'));
   if(node) node.classList.add('sel');
   document.getElementById('chatWho').textContent='Talking to '+name+'. New conversation.';
   document.getElementById('chatMsgs').textContent='';
@@ -315,7 +293,6 @@ async function loadTheses(){
   }catch(e){ out.textContent='[error] '+e.message; }
 }
 
-// directives
 async function loadDirectives(){
   const out=document.getElementById('dirOut');
   try{
@@ -323,11 +300,12 @@ async function loadDirectives(){
     if(!r.directives.length){ out.appendChild(el('div',{class:'hint',text:'No directives yet. Add one above, or tell an expert "remember that ...".'})); return; }
     r.directives.forEach(d=>{
       const card=el('div',{class:'card'});
-      const head=el('div',{class:'row'},[
+      const head=el('div',{class:'head'},[
         el('b',{text:d.title||d.stable_id}),
-        el('span',{class:'stance', text:d.symbol||d.scope||'global'}),
+        el('span',{class:'chip', text:d.symbol||d.scope||'global'}),
         el('span',{class:'hint', text:d.family?('fam '+d.family):'all families'}),
         el('span',{class:'hint', text:d.level||''}),
+        el('span',{class:'grow'}),
       ]);
       const forget=el('button',{class:'ghost',text:'Forget'});
       forget.onclick=async()=>{ try{ await api.del('/api/experts/directives/'+encodeURIComponent(d.stable_id)); loadDirectives(); }catch(e){ alert(e.message); } };
@@ -355,10 +333,9 @@ document.getElementById('dirAdd').onclick=async()=>{
 };
 document.getElementById('dirRefresh').onclick=loadDirectives;
 
-// tab switching
-document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
-  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('sel'));
-  document.querySelectorAll('main > .view').forEach(v=>v.classList.remove('sel'));
+root.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  root.querySelectorAll('.tab').forEach(x=>x.classList.remove('sel'));
+  root.querySelectorAll('main > .view').forEach(v=>v.classList.remove('sel'));
   t.classList.add('sel');
   document.getElementById('view-'+t.dataset.tab).classList.add('sel');
   if(t.dataset.tab==='theses') loadTheses();
@@ -371,5 +348,4 @@ document.getElementById('thRefresh').onclick=loadTheses;
 
 loadState(); loadRoster();
 </script>
-</body>
-</html>
+{% endblock %}

@@ -87,7 +87,7 @@ def mount_dashboard(app: FastAPI) -> None:
 
     @app.get("/experts", response_class=HTMLResponse)
     def experts_page(request: Request):
-        return templates.TemplateResponse(request, "experts.html")
+        return templates.TemplateResponse(request, "experts.html", {"active": "experts"})
 
     @app.get("/api/dashboard")
     def dashboard_snapshot(request: Request):
