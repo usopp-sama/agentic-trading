@@ -30,6 +30,13 @@
   #xp .bubble.assistant{align-self:flex-start;background:var(--panel2);border:1px solid var(--border)}
   #xp .cites{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
   #xp .chip{display:inline-block;font-size:11px;color:var(--muted);background:var(--panel2);padding:2px 8px;border-radius:999px;margin:0}
+  #xp .tchip{cursor:pointer;font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--border);padding:3px 10px;border-radius:999px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #xp .tchip:hover{border-color:var(--blue);color:var(--text)}
+  #xp .tchip.sel{border-color:var(--blue);color:var(--text);background:#16314f}
+  #xp .tchip.new{color:var(--green);border-color:rgba(46,194,107,.4)}
+  #xp .roundhead{display:flex;align-items:center;gap:8px;margin:14px 0 8px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+  #xp .roundhead::after{content:"";flex:1;height:1px;background:var(--border)}
+  #xp .delta{font-size:11px;font-weight:700;padding:1px 6px;border-radius:6px;background:var(--panel2)}
   #xp .stance{font-weight:700;padding:2px 8px;border-radius:6px;font-size:12px}
   #xp .s-strong_buy,#xp .s-buy{background:rgba(46,194,107,.15);color:var(--green)}
   #xp .s-sell,#xp .s-strong_sell{background:rgba(255,93,93,.15);color:var(--red)}
@@ -64,6 +71,7 @@
     <div class="view sel" id="view-chat" style="display:flex;flex-direction:column;padding:0">
       <div style="flex:1;overflow:auto;padding:16px" id="chatScroll">
         <div id="chatWho" class="hint" style="margin-bottom:8px">Pick an expert on the left to start.</div>
+        <div id="threadStrip" class="xrow" style="margin-bottom:10px;gap:6px"></div>
         <div class="msg-list" id="chatMsgs"></div>
       </div>
       <div class="composer">
@@ -194,6 +202,46 @@ function selectExpert(id,name,node){
   if(node) node.classList.add('sel');
   document.getElementById('chatWho').textContent='Talking to '+name+'. New conversation.';
   document.getElementById('chatMsgs').textContent='';
+  loadThreads();
+}
+
+async function loadThreads(){
+  const strip=document.getElementById('threadStrip'); strip.textContent='';
+  if(!selected) return;
+  const neu=el('span',{class:'tchip new',title:'Start a fresh conversation',text:'+ New'});
+  neu.onclick=()=>startNewThread();
+  strip.appendChild(neu);
+  try{
+    const r=await api.get('/api/experts/threads?expert='+encodeURIComponent(selected));
+    r.threads.slice(0,12).forEach(t=>{
+      const label=(t.symbol?('['+t.symbol+'] '):'')+(t.title||('#'+t.id));
+      const chip=el('span',{class:'tchip'+(t.id===threadId?' sel':''),title:label+' · '+(t.updated_ts||''),text:label});
+      chip.onclick=()=>resumeThread(t.id);
+      strip.appendChild(chip);
+    });
+  }catch(e){}
+}
+
+function startNewThread(){
+  threadId=null;
+  document.getElementById('chatMsgs').textContent='';
+  document.getElementById('chatWho').textContent='Talking to '+selectedName+'. New conversation.';
+  root.querySelectorAll('#threadStrip .tchip').forEach(c=>c.classList.remove('sel'));
+}
+
+async function resumeThread(id){
+  try{
+    const t=await api.get('/api/experts/threads/'+id);
+    threadId=t.id;
+    document.getElementById('chatMsgs').textContent='';
+    (t.messages||[]).forEach(m=>{
+      const meta=m.meta||{};
+      addBubble(m.role==='user'?'user':'assistant', m.content, {citations:meta.citations, model:meta.model, is_real:meta.is_real});
+    });
+    document.getElementById('chatWho').textContent='Talking to '+selectedName+' · thread #'+t.id+(t.symbol?(' · '+t.symbol):'')+' (resumed)';
+    loadThreads();
+    document.getElementById('chatScroll').scrollTop=0;
+  }catch(e){ alert('Could not load thread: '+e.message); }
 }
 
 function addBubble(role, text, meta){
@@ -222,10 +270,12 @@ async function sendChat(){
   try{
     const r=await api.post('/api/experts/'+encodeURIComponent(selected)+'/ask',
       {message:msg, symbol:sym||null, info:info||null, thread_id:threadId});
+    const wasNew = !threadId;
     threadId=r.thread_id;
     document.getElementById('chatWho').textContent='Talking to '+selectedName+' · thread #'+threadId+(r.symbol?(' · '+r.symbol):'');
     addBubble('assistant', r.answer, {citations:r.citations, model:r.model, is_real:r.is_real});
     document.getElementById('chatInfo').value='';
+    if(wasNew) loadThreads();
   }catch(e){ addBubble('assistant','[error] '+e.message); }
   btn.disabled=false; btn.textContent='Send';
 }
@@ -245,18 +295,58 @@ async function runDebate(){
       el('div',{text:p.rationale||''}),
     ]);
     document.getElementById('debProposal').appendChild(pc);
-    const last=r.transcript[r.transcript.length-1];
-    last.opinions.sort((a,b)=>b.conviction-a.conviction).forEach(o=>{
-      const card=el('div',{class:'card'},[
-        el('div',{class:'head'},[el('b',{text:o.name}), stancePill(o.stance), el('span',{class:'grow'}), el('span',{class:'chip',text:o.family})]),
-        convBar(o.conviction),
-        el('div',{style:'margin-top:6px',text:o.rationale||''}),
-      ]);
-      if((o.key_risks||[]).length){ card.appendChild(el('div',{class:'cites'}, o.key_risks.map(k=>el('span',{class:'chip',text:'risk: '+k})))); }
-      document.getElementById('debOut').appendChild(card);
+    const out=document.getElementById('debOut');
+    const prevByName={};   // carry stance/conviction across rounds to show how views moved
+    (r.transcript||[]).forEach((rd,idx)=>{
+      const label = rd.round===0 ? 'Opening views' : ('Rebuttal round '+rd.round);
+      out.appendChild(el('div',{class:'roundhead'},[el('span',{text:label})]));
+      [...rd.opinions].sort((a,b)=>b.conviction-a.conviction).forEach(o=>{
+        const head=[el('b',{text:o.name}), stancePill(o.stance), el('span',{class:'grow'})];
+        const prev=prevByName[o.name];
+        if(prev){
+          if(prev.stance!==o.stance) head.push(el('span',{class:'delta',text:prev.stance.replace('_',' ')+' → '+o.stance.replace('_',' ')}));
+          else { const dc=Math.round((o.conviction-prev.conviction)*100); if(dc) head.push(el('span',{class:'delta',text:(dc>0?'+':'')+dc+'% conv'})); }
+        }
+        head.push(el('span',{class:'chip',text:o.family}));
+        const card=el('div',{class:'card'},[
+          el('div',{class:'head'},head),
+          convBar(o.conviction),
+          el('div',{style:'margin-top:6px',text:o.rationale||''}),
+        ]);
+        if((o.key_risks||[]).length){ card.appendChild(el('div',{class:'cites'}, o.key_risks.map(k=>el('span',{class:'chip',text:'risk: '+k})))); }
+        out.appendChild(card);
+        prevByName[o.name]={stance:o.stance, conviction:o.conviction};
+      });
     });
   }catch(e){ document.getElementById('debOut').appendChild(el('div',{class:'card',text:'[error] '+e.message})); }
   btn.disabled=false; btn.textContent='Convene debate';
+}
+
+function toggleRevisit(card, btn, expert, symbol){
+  const existing=card.querySelector('.revisit-box');
+  if(existing){ existing.remove(); btn.textContent='Revisit'; return; }
+  btn.textContent='Cancel';
+  const ta=el('textarea',{placeholder:'Optional new information for '+expert+' to weigh (a headline, a number, your view)…',rows:'2'});
+  const run=el('button',{text:'Re-evaluate '+symbol});
+  const status=el('span',{class:'hint'});
+  const box=el('div',{class:'revisit-box',style:'margin-top:10px;border-top:1px dashed var(--border);padding-top:10px'},[
+    ta, el('div',{class:'xrow',style:'margin-top:8px'},[run,status]),
+  ]);
+  card.appendChild(box);
+  run.onclick=async()=>{
+    run.disabled=true; status.textContent='Re-evaluating…';
+    try{
+      const res=await api.post('/api/experts/'+encodeURIComponent(expert)+'/revisit',{symbol, info:ta.value.trim()||null});
+      status.textContent='';
+      box.appendChild(el('div',{class:'rev',style:'margin-top:10px'},[
+        el('span',{class:'act '+res.action,text:res.action}),
+        el('span',{text:'  '+res.prev_stance+' → '+res.new_stance+'  (conv '+res.prev_conviction+' → '+res.new_conviction+')'}),
+        el('div',{style:'margin-top:4px',text:res.thesis||''}),
+      ]));
+      run.remove();
+      setTimeout(loadTheses, 1400);
+    }catch(e){ status.textContent='Error: '+e.message; run.disabled=false; }
+  };
 }
 
 async function loadTheses(){
@@ -265,17 +355,20 @@ async function loadTheses(){
     const r=await api.get('/api/experts/theses'); out.textContent='';
     if(!r.theses.length){ out.appendChild(el('div',{class:'hint',text:'No theses yet.'})); return; }
     r.theses.forEach(t=>{
+      const revisitBtn=el('button',{class:'ghost',text:'Revisit'});
       const card=el('div',{class:'card'},[
         el('div',{class:'head'},[
           el('b',{text:t.symbol}), el('span',{class:'chip',text:t.expert}), stancePill(t.stance),
           el('span',{class:'grow'}),
           el('span',{class:'chip',text:t.revisions+' rev'}),
           el('span',{class:'chip',text:t.status}),
+          revisitBtn,
         ]),
         convBar(t.conviction),
         el('div',{style:'margin-top:6px',text:t.thesis||''}),
       ]);
       if(t.invalidation) card.appendChild(el('div',{class:'hint',text:'Invalidated if: '+t.invalidation}));
+      revisitBtn.onclick=()=>toggleRevisit(card, revisitBtn, t.expert, t.symbol);
       const det=el('details'); det.appendChild(el('summary',{text:'history'}));
       const body=el('div'); det.appendChild(body);
       det.ontoggle=async()=>{ if(det.open && !body.dataset.loaded){ body.dataset.loaded='1';
