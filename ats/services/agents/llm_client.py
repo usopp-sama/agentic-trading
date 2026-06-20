@@ -7,7 +7,8 @@ callers never hand-roll prompts. Implementations:
   normalized directional signals the context assembler produced. It needs no
   API key, runs offline, is reproducible, and doubles as the safety fallback
   when a real provider errors.
-- ``HttpLLMClient``: talks to Ollama or any OpenAI-compatible endpoint. The
+- ``HttpLLMClient``: talks to Ollama, Google Gemini, or any OpenAI-compatible
+  endpoint. The
   grounded context is passed as DATA (clearly delimited, treated as untrusted),
   and the model must return strict JSON matching the Opinion schema. On any
   failure it falls back to the mock heuristic so the system never stalls.
@@ -62,6 +63,8 @@ class LLMClient(Protocol):
 
     def chat(self, system: str, messages: list[dict], json_mode: bool = False) -> str: ...
 
+    def health_check(self) -> tuple[bool, str]: ...
+
     @property
     def is_real(self) -> bool: ...
 
@@ -74,6 +77,10 @@ class MockLLMClient:
     @property
     def is_real(self) -> bool:
         return False
+
+    def health_check(self) -> tuple[bool, str]:
+        # The mock has no endpoint; it is always "available" but never real.
+        return (False, "mock provider (no language model)")
 
     def chat(self, system: str, messages: list[dict], json_mode: bool = False) -> str:
         """Offline, grounded heuristic answer.
@@ -172,6 +179,28 @@ class HttpLLMClient:  # pragma: no cover - requires a running model endpoint
     def is_real(self) -> bool:
         return True
 
+    def health_check(self) -> tuple[bool, str]:
+        """Probe the endpoint with a tiny request and a short timeout.
+
+        Used at startup so we can tell whether real reasoning will actually
+        happen (vs. silently falling back to the mock on every call, which
+        would otherwise cost one full ``timeout`` per SME). Returns
+        ``(ok, detail)``.
+        """
+        try:
+            probe_timeout = min(self.timeout, 6.0)
+            out = self._complete(
+                "You are a health probe. Reply with the single word: OK.",
+                [{"role": "user", "content": "OK"}],
+                json_mode=False,
+                timeout=probe_timeout,
+            )
+            if out and str(out).strip():
+                return (True, f"{self.provider}:{self.model}")
+            return (False, "empty response")
+        except Exception as exc:  # noqa: BLE001
+            return (False, f"{type(exc).__name__}: {str(exc)[:160]}")
+
     def generate_opinion(self, persona: dict, context: dict) -> dict:
         system = (
             persona.get("system_prompt", "You are a financial analyst.")
@@ -204,10 +233,40 @@ class HttpLLMClient:  # pragma: no cover - requires a running model endpoint
             log.warning("llm_chat_failed_fallback_mock", extra={"error": str(exc)})
             return self._fallback.chat(system, messages, json_mode=json_mode)
 
-    def _complete(self, system: str, messages: list[dict], json_mode: bool) -> str:
+    def _complete(self, system: str, messages: list[dict], json_mode: bool,
+                  timeout: float | None = None) -> str:
         import httpx
 
+        t = timeout if timeout is not None else self.timeout
         full = [{"role": "system", "content": system}, *messages]
+        if self.provider == "gemini":
+            # Google Gemini native REST API. The key is sent in the
+            # ``x-goog-api-key`` header (never in the URL) so it does not leak
+            # into request logs. The system prompt maps to ``system_instruction``
+            # and the assistant role maps to Gemini's ``model`` role.
+            contents = [
+                {
+                    "role": "model" if m.get("role") == "assistant" else "user",
+                    "parts": [{"text": str(m.get("content", ""))}],
+                }
+                for m in messages
+            ]
+            gen_cfg: dict = {"temperature": self.temperature}
+            if json_mode:
+                gen_cfg["responseMimeType"] = "application/json"
+            body: dict = {"contents": contents, "generationConfig": gen_cfg}
+            if system:
+                body["system_instruction"] = {"parts": [{"text": system}]}
+            headers = {"x-goog-api-key": self.api_key} if self.api_key else {}
+            resp = httpx.post(
+                f"{self.base_url}/v1beta/models/{self.model}:generateContent",
+                headers=headers,
+                json=body,
+                timeout=t,
+            )
+            resp.raise_for_status()
+            parts = resp.json()["candidates"][0]["content"]["parts"]
+            return "".join(p.get("text", "") for p in parts)
         if self.provider == "ollama":
             body = {
                 "model": self.model,
@@ -217,7 +276,7 @@ class HttpLLMClient:  # pragma: no cover - requires a running model endpoint
             }
             if json_mode:
                 body["format"] = "json"
-            resp = httpx.post(f"{self.base_url}/api/chat", json=body, timeout=self.timeout)
+            resp = httpx.post(f"{self.base_url}/api/chat", json=body, timeout=t)
             resp.raise_for_status()
             return resp.json()["message"]["content"]
         # OpenAI-compatible
@@ -229,7 +288,7 @@ class HttpLLMClient:  # pragma: no cover - requires a running model endpoint
             f"{self.base_url}/v1/chat/completions",
             headers=headers,
             json=body,
-            timeout=self.timeout,
+            timeout=t,
         )
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
@@ -270,3 +329,38 @@ def build_llm_client(role: str = "sme") -> LLMClient:
         temperature=s.llm_temperature,
         timeout=s.llm_timeout_s,
     )
+
+
+def select_llm_clients() -> tuple[LLMClient, LLMClient, dict]:
+    """Build the SME + CIO clients and verify a real provider actually answers.
+
+    If a real provider is configured but unreachable, both clients are
+    downgraded to the deterministic mock for this session. This avoids paying
+    one full ``llm_timeout_s`` (default 60s) per SME call just to fall back, and
+    surfaces an honest startup status instead of pretending reasoning is live.
+
+    Returns ``(sme_client, cio_client, status)`` where ``status`` is safe to log.
+    """
+    s = get_settings()
+    sme = build_llm_client("sme")
+    cio = build_llm_client("cio")
+    if not sme.is_real:
+        return sme, cio, {"provider": s.llm_provider, "real": False, "detail": "mock provider"}
+
+    ok, detail = sme.health_check()
+    if ok:
+        log.info(
+            "llm_selfcheck_ok",
+            extra={"provider": s.llm_provider, "sme_model": s.llm_model,
+                   "cio_model": s.llm_cio_model, "detail": detail},
+        )
+        return sme, cio, {"provider": s.llm_provider, "real": True, "detail": detail}
+
+    log.warning(
+        "llm_selfcheck_failed_downgrading_to_mock",
+        extra={"provider": s.llm_provider, "base_url": s.llm_base_url,
+               "model": s.llm_model, "detail": detail},
+    )
+    mock = MockLLMClient()
+    return mock, mock, {"provider": s.llm_provider, "real": False,
+                        "downgraded": True, "detail": detail}

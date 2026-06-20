@@ -59,9 +59,12 @@ class Settings(BaseSettings):
     debate_rounds: int = 1
     expert_memory_messages: int = 20  # per-thread chat history kept for context
 
-    # --- LLM (provider: "mock" | "ollama" | "openai") ---
+    # --- LLM (provider: "mock" | "ollama" | "openai" | "gemini") ---
     # "mock" is a deterministic, grounded heuristic so the whole system runs
     # with no API key. You manage real providers/keys.
+    # For Gemini (Google AI Studio): set provider="gemini",
+    # base_url="https://generativelanguage.googleapis.com",
+    # model="gemini-2.5-flash" (or -pro), and put the key in ATS_LLM_API_KEY.
     llm_provider: str = "mock"
     llm_model: str = "mock-1"
     llm_base_url: str = "http://localhost:11434"  # ollama default

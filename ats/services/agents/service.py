@@ -24,7 +24,7 @@ from ats.services.agents.cio import CIO
 from ats.services.agents.console import ExpertConsole
 from ats.services.agents.directives import get_directive_store
 from ats.services.agents.knowledge_base import get_knowledge_base
-from ats.services.agents.llm_client import build_llm_client
+from ats.services.agents.llm_client import select_llm_clients
 from ats.services.agents.registry import families, load_personas
 from ats.services.agents.runtime import SmeRuntime
 from ats.services.agents.tools import Providers
@@ -47,6 +47,7 @@ class AgentService:
         self._macro_personas: list[dict] = []
         self._macro_tilt: float = 0.0
         self._console: ExpertConsole | None = None
+        self._llm_status: dict = {"provider": "mock", "real": False}
         # Debounce macro re-evaluation driven by incoming news.
         self._last_macro_news: float = 0.0
         self._macro_news_min_gap_s: float = 90.0
@@ -60,7 +61,11 @@ class AgentService:
             knowledge=ctx.orchestrator.get("knowledge"),
             fundamentals=ctx.orchestrator.get("fundamentals"),
         )
-        self._runtime = SmeRuntime(providers)
+        # Build the SME + CIO LLM clients and verify a real provider actually
+        # answers; if not, downgrade to the deterministic mock for this session
+        # (prevents a 60s-per-call timeout when Ollama/API is misconfigured).
+        sme_llm, cio_llm, self._llm_status = select_llm_clients()
+        self._runtime = SmeRuntime(providers, llm_client=sme_llm)
         self._personas = self._load_personas()
         self._by_id = {p["id"]: p for p in self._personas}
         self._symbol_personas = [p for p in self._personas if p["scope"] == "symbol"]
@@ -72,9 +77,7 @@ class AgentService:
         get_directive_store().load_all()
 
         # Interactive expert console (tiered routing: stronger model for CIO).
-        self._console = ExpertConsole(
-            providers, self._by_id, self._runtime.llm, build_llm_client("cio")
-        )
+        self._console = ExpertConsole(providers, self._by_id, sme_llm, cio_llm)
 
         ctx.bus.subscribe(Topic.VOLUME_SPIKE, self._on_spike)
         ctx.bus.subscribe(Topic.SENTIMENT, self._on_sentiment)
@@ -260,6 +263,10 @@ class AgentService:
 
     def console(self) -> ExpertConsole | None:
         return self._console
+
+    def llm_status(self) -> dict:
+        """Startup self-check result: is real reasoning actually live?"""
+        return dict(self._llm_status)
 
     @property
     def macro_tilt(self) -> float:
