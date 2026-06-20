@@ -125,14 +125,43 @@ launchctl load ~/Library/LaunchAgents/com.ats.server.plist
 launchctl list | grep com.ats.server
 ```
 
-### Docker Compose (already in the repo)
+### Docker Compose (recommended — works on Windows too)
+
+This is the simplest "one command" path and the only one that does **not** care
+whether the host is Windows, macOS, or Linux: the app runs inside a Linux
+container via Docker Desktop (WSL2 on Windows). You do **not** install Python on
+the host.
+
+**One-time setup on the server laptop:**
+
+1. Install Docker Desktop and make sure it's running.
+2. Get the code: `git clone <repo>` (or copy the folder) and `cd` into it.
+3. Create the secrets file at the **repo root**:
+   - copy `deploy/.env.example` to `.env`
+   - fill in your `ATS_LLM_*` keys (e.g. the Gemini key) so the SMEs reason for real
+   - optionally set `ATS_DASHBOARD_TOKEN` to a long random string
+
+**Launch (lean profile — SQLite + in-memory bus, nothing else to manage):**
 
 ```bash
-# docker-compose.yml exists; pass host/port through the environment
-ATS_HOST=0.0.0.0 ATS_PORT=8000 docker compose up -d
+# from the repo root
+docker compose -f deploy/docker-compose.lan.yml up -d --build
 ```
 
-Make sure the compose service publishes the port: `ports: ["8000:8000"]`.
+That's it. The container binds to `0.0.0.0:8000` on the host by default, so from
+any device on the same Wi-Fi open `http://<server-ip>:8000` (find the IP via
+step 2 above). To restrict to this machine only, set `ATS_BIND=127.0.0.1` in
+`.env`. Logs: `docker compose -f deploy/docker-compose.lan.yml logs -f`.
+Stop: `docker compose -f deploy/docker-compose.lan.yml down`.
+
+**Scaled profile (Postgres/TimescaleDB + Redis)** — only when you outgrow
+SQLite. Requires a strong `POSTGRES_PASSWORD` in `.env`; defaults to
+localhost-only (front it with a reverse proxy / VPN, or set `ATS_BIND=0.0.0.0`
+on a trusted network):
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d --build
+```
 
 ## 6. Access securely from anywhere (optional) — Tailscale
 

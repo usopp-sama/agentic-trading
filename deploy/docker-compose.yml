@@ -11,10 +11,12 @@ services:
       args:
         INSTALL_EXTRAS: "true"   # build Postgres/Redis drivers into the image
     restart: unless-stopped
+    # Optional: the app boots in mock/SQLite mode even if .env is missing.
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     environment:
-      ATS_DB_URL: postgresql+psycopg://ats:${POSTGRES_PASSWORD:-changeme}@postgres:5432/ats
+      ATS_DB_URL: postgresql+psycopg://ats:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/ats
       ATS_EVENT_BUS: redis
       ATS_REDIS_URL: redis://redis:6379/0
       # In-memory vector store today; switch to a service-backed store once wired.
@@ -24,9 +26,11 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # Expose ONLY on localhost. Use Tailscale/VPN for remote access; never 0.0.0.0.
+    # Default exposes ONLY on localhost (this scaled stack expects a reverse
+    # proxy + TLS in front). For a quick LAN trial use docker-compose.lan.yml,
+    # or set ATS_BIND=0.0.0.0 here behind a trusted network / VPN.
     ports:
-      - "127.0.0.1:8000:8000"
+      - "${ATS_BIND:-127.0.0.1}:8000:8000"
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -47,7 +51,8 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ats
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      # No insecure default: set a strong POSTGRES_PASSWORD in .env.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ats
     volumes:
       - pg_data:/var/lib/postgresql/data
