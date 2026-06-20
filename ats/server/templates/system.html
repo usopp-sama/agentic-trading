@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}System{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="card span12 reveal">
+    <h2>Pipeline</h2>
+    <p class="sub">Live flow across the always-on services</p>
+    <div id="pipeline" style="display:flex;gap:8px;overflow:auto;padding-bottom:4px"></div>
+  </div>
+
+  <div class="card span6 reveal">
+    <h2>SME roster</h2>
+    <div style="overflow:auto;max-height:300px">
+      <table><thead><tr><th>Expert</th><th>Family</th><th>Weight</th><th>Status</th></tr></thead>
+      <tbody id="roster"><tr><td colspan="4" class="muted">—</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="card span6 reveal">
+    <h2>Leaderboard</h2>
+    <div style="overflow:auto;max-height:300px">
+      <table><thead><tr><th>Expert</th><th>Score</th><th>Hits</th></tr></thead>
+      <tbody id="leader"><tr><td colspan="3" class="muted">—</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="card span12 reveal">
+    <div class="row-between"><h2 style="margin:0">Event stream</h2><span class="muted" id="evRate"></span></div>
+    <div id="logstream" style="font-family:ui-monospace,monospace;font-size:12px;max-height:340px;overflow:auto;margin-top:8px"></div>
+  </div>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+(function () {
+  const A = window.ATS;
+
+  function loadPipeline() {
+    A.fetchJSON("/api/pipeline").then((d) => {
+      const el = document.getElementById("pipeline");
+      el.innerHTML = (d.stages || []).map((s) => {
+        const pillCls = s.count > 0 ? "pill green" : "pill gray";
+        const recent = (s.recent||[]).slice(0,3).map((r)=>A.esc(r.summary)).join("<br>");
+        const idle = s.window24h > 0 ? `${s.window24h} in last 24h` : "idle";
+        return `<div class="card" style="min-width:150px;flex:0 0 auto">
+          <div class="row-between"><b>${A.esc(s.label)}</b><span class="${pillCls}" title="max of 24h throughput and this session">${s.count}</span></div>
+          <div class="muted" style="font-size:11px;margin-top:6px">${recent || idle}</div>
+        </div>`;
+      }).join("");
+    });
+  }
+  function loadAgents() {
+    A.fetchJSON("/api/agents").then((d) => {
+      const r = document.getElementById("roster");
+      r.innerHTML = (d.roster||[]).length ? d.roster.map((p) =>
+        `<tr><td>${A.esc(p.name)}</td><td>${A.esc(p.family)}</td><td>${A.fmt(p.weight)}</td><td>${A.esc(p.status)}</td></tr>`).join("")
+        : '<tr><td colspan="4" class="muted">No experts.</td></tr>';
+      const l = document.getElementById("leader");
+      l.innerHTML = (d.leaderboard||[]).length ? d.leaderboard.map((x) =>
+        `<tr><td>${A.esc(x.sme||x.name||x.id)}</td><td>${A.fmt(x.score)}</td><td>${A.fmt(x.n||x.hits)}</td></tr>`).join("")
+        : '<tr><td colspan="3" class="muted">No track record yet.</td></tr>';
+    });
+  }
+
+  const stream = document.getElementById("logstream");
+  let count = 0;
+  function pushEvent(m) {
+    count++;
+    const row = document.createElement("div");
+    const p = m.payload || {};
+    const sym = p.symbol || (p.tickers||[]).join(",") || "";
+    row.innerHTML = `<span class="muted">${A.ago(m.ts)}</span> <b>${A.esc(m.topic)}</b> ${A.esc(sym)}`;
+    stream.insertBefore(row, stream.firstChild);
+    while (stream.children.length > 200) stream.removeChild(stream.lastChild);
+    document.getElementById("evRate").textContent = count + " events seen";
+  }
+  A.on("event", pushEvent);
+  A.fetchJSON("/api/logs").then((d) => (d.events||[]).slice(0,60).forEach((e) =>
+    pushEvent({ topic: e.topic, ts: e.ts, payload: { symbol: e.summary } })));
+
+  loadPipeline(); loadAgents();
+  setInterval(() => { loadPipeline(); loadAgents(); }, 8000);
+})();
+</script>
+{% endblock %}

@@ -137,8 +137,37 @@ class MarketDataService:
     def latest_price(self, symbol: str) -> float | None:
         return self._last_price.get(symbol)
 
+    def intraday(self, symbol: str, interval: str = "5m", limit: int = 300) -> list[dict]:
+        """Intraday candles from the source when it supports them (nse_live);
+        empty otherwise so callers fall back to the persisted daily store."""
+        fn = getattr(self.source, "intraday", None)
+        if fn is None:
+            return []
+        try:
+            return fn(symbol, interval=interval, limit=limit)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("intraday_failed", extra={"symbol": symbol, "error": str(exc)})
+            return []
+
     def watchlist(self) -> list[str]:
         return list(self._symbols)
+
+    def reload_watchlist(self) -> list[str]:
+        """Re-read the active universe (after an edit) and backfill new names."""
+        from ats.services.market_data.store import upsert_bars
+
+        self._symbols = self._load_watchlist()
+        for sym in self._symbols:
+            if sym in self._history:
+                continue
+            try:
+                df = self.source.poll(sym)
+                upsert_bars(sym, df)
+                self._history[sym] = df
+                self._last_price[sym] = float(df["close"].iloc[-1])
+            except Exception as exc:  # noqa: BLE001
+                log.warning("watchlist_backfill_failed", extra={"symbol": sym, "error": str(exc)})
+        return self._symbols
 
     def data_status(self) -> dict:
         """Report how many symbols are on the live feed vs synthetic fallback."""

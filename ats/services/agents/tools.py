@@ -77,6 +77,10 @@ def get_sentiment(p: Providers, symbol: str) -> dict:
 def get_news(p: Providers, symbol: str, k: int = 3) -> list[dict]:
     if not p.nlp:
         return []
+    # The market-scope experts read the latest world/macro headlines (no single
+    # ticker); per-symbol experts get news semantically matched to their symbol.
+    if symbol == "MARKET" and hasattr(p.nlp, "recent_news"):
+        return p.nlp.recent_news(k=max(k, 5))
     return p.nlp.search_symbol(symbol, k=k)
 
 

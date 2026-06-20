@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Opportunities{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="card span12 reveal">
+    <div class="row-between">
+      <div><h2 style="margin:0">Opportunity radar</h2>
+        <p class="sub" style="margin:2px 0 0">Money-making setups our background analysis found — ranked by conviction</p></div>
+      <div class="charttools" style="margin:0">
+        <label class="muted" style="font-size:12px">min conviction</label>
+        <select id="minScore">
+          <option value="0">any</option><option value="0.33">medium+</option><option value="0.66">high</option>
+        </select>
+        <button id="refresh">↻</button>
+      </div>
+    </div>
+  </div>
+  <div class="span12">
+    <div class="opp-grid" id="oppGrid"><div class="empty">Scanning the universe…</div></div>
+  </div>
+</div>
+
+<div class="reader" id="detail">
+  <button class="x icon-btn" id="detailClose">✕</button>
+  <div id="detailBody"></div>
+</div>
+{% endblock %}
+{% block script %}
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+<script src="/static/charts.js"></script>
+<script>
+(function () {
+  const A = window.ATS;
+  let cache = [];
+
+  function render(list) {
+    cache = list || [];
+    const el = document.getElementById("oppGrid");
+    if (!cache.length) { el.innerHTML = '<div class="empty">No setups clear the bar yet. The algorithms keep watching.</div>'; return; }
+    el.innerHTML = cache.map(A.oppCard).join("");
+    el.querySelectorAll(".opp").forEach((c) => c.onclick = () => openDetail(c.dataset.symbol));
+    // deep link (#SYMBOL)
+    if (location.hash.length > 1) openDetail(decodeURIComponent(location.hash.slice(1)));
+  }
+
+  async function load() {
+    const ms = document.getElementById("minScore").value;
+    const d = await A.fetchJSON("/api/opportunities?limit=60&min_score=" + ms);
+    render(d.opportunities);
+  }
+
+  async function openDetail(sym) {
+    const d = await A.fetchJSON("/api/opportunities/" + encodeURIComponent(sym));
+    if (d.error) return;
+    const sigs = (d.signals || []).map((s) =>
+      `<tr><td>${A.esc(s.strategy)}</td><td>${A.esc(s.stance)}</td><td>${A.fmt(s.conviction)}</td></tr>`).join("");
+    const ops = (d.opinions || []).map((o) =>
+      `<div style="margin:8px 0"><b>${A.esc(o.sme)}</b> · <span class="side ${o.stance.toLowerCase().match(/buy|long|bull/)?'LONG':'SHORT'}">${A.esc(o.stance)}</span>
+        <span class="muted">conv ${A.fmt(o.conviction)}</span><div class="muted" style="font-size:13px;margin-top:3px">${A.esc(o.rationale)}</div></div>`).join("");
+    const inv = d.invalidation ? `<p><b>Invalidation:</b> ${A.esc(d.invalidation.note)}</p>` : "";
+    const tr = d.track_record ? `<p><b>${A.esc(d.track_record.strategy)} track:</b> Sharpe ${A.fmt(d.track_record.sharpe)} · virtual equity ${A.fmt(d.track_record.equity)} (${A.fmt(d.track_record.days)}d)</p>` : "";
+    document.getElementById("detailBody").innerHTML = `
+      <div class="row-between"><h2>${A.esc(d.symbol)}</h2>
+        <span><span class="side ${A.esc(d.side)}">${A.esc(d.side)}</span> <span class="conv ${A.esc(d.conviction)}">${A.esc(d.conviction)}</span></span></div>
+      <p>${A.esc(d.thesis)} <button class="explain-btn" id="explainThesis">Explain ▾</button></p>
+      ${inv}${tr}
+      ${d.risks && d.risks.length ? `<p><b>Key risks:</b> ${d.risks.map(A.esc).join(", ")}</p>` : ""}
+      <div class="lwc" id="detailChart" style="height:260px"></div>
+      <h3 style="margin:14px 0 4px">Signals</h3>
+      <table><thead><tr><th>strategy</th><th>stance</th><th>conv</th></tr></thead><tbody>${sigs || '<tr><td class="muted">none</td></tr>'}</tbody></table>
+      <h3 style="margin:14px 0 4px">Expert views</h3>
+      ${ops || '<div class="muted">none</div>'}
+      <p style="margin-top:14px"><a href="/charts#${A.esc(d.symbol)}">Open full chart →</a></p>`;
+    document.getElementById("detail").classList.add("open");
+    const eb = document.getElementById("explainThesis");
+    if (eb) eb.onclick = (e) => { e.stopPropagation(); A.explain(eb, `Opportunity ${d.symbol}: ${d.side} conviction ${d.conviction}. ${d.thesis}`); };
+    window.ATSChart && window.ATSChart.mini("detailChart", d.symbol);
+  }
+  document.getElementById("detailClose").onclick = () => { document.getElementById("detail").classList.remove("open"); history.replaceState(null, "", location.pathname); };
+  document.getElementById("refresh").onclick = load;
+  document.getElementById("minScore").onchange = load;
+  A.on("snapshot", (s) => { if (s && s.opportunities && !document.getElementById("detail").classList.contains("open")) render(s.opportunities); });
+  load();
+})();
+</script>
+{% endblock %}

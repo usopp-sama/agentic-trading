@@ -96,6 +96,73 @@ class KiteDataSource:
         )
 
 
+# yfinance interval/period mapping for intraday (free, no API key, covers NSE
+# via the .NS suffix). The pluggable seam below lets Zerodha Kite replace this
+# later without touching the pages or the /api/ohlcv endpoint.
+_YF_INTERVAL = {"1m": "1m", "3m": "5m", "5m": "5m", "15m": "15m", "30m": "30m",
+                "60m": "60m", "1h": "60m", "1d": "1d", "1w": "1wk"}
+_YF_PERIOD = {"1m": "5d", "5m": "1mo", "15m": "2mo", "30m": "2mo",
+              "60m": "6mo", "1h": "6mo", "1d": "2y", "1w": "5y"}
+
+
+def _to_nse_yf(symbol: str) -> str:
+    """Bare NSE symbol -> yfinance ticker (RELIANCE -> RELIANCE.NS); leave
+    indices (^NSEI) and already-suffixed symbols untouched."""
+    if "." in symbol or symbol.startswith("^"):
+        return symbol
+    return symbol + ".NS"
+
+
+class NseLiveSource:
+    """Live NSE quotes + intraday candles, no API key, via yfinance (an
+    open-source data source covering NSE through the ``.NS`` suffix).
+
+    ``poll`` returns daily backfill (for the strategy/backtest layer);
+    ``intraday`` returns recent 1m/5m/15m/… candles shaped for the charts.
+    Cached + rate-limit aware. Pluggable: a Kite-backed source can implement the
+    same ``poll`` + ``intraday`` + ``quote`` interface and drop straight in.
+    """
+
+    def __init__(self, refresh_s: int = 60) -> None:
+        self._daily = YFinanceDataSource(period="2y")
+        self._refresh_s = refresh_s
+        self._intraday_cache: dict[tuple[str, str], tuple[float, list[dict]]] = {}
+
+    def poll(self, symbol: str) -> pd.DataFrame:
+        return self._daily.poll(_to_nse_yf(symbol))
+
+    def quote(self, symbol: str) -> float | None:
+        try:
+            df = self.poll(symbol)
+            return float(df["close"].iloc[-1]) if df is not None and not df.empty else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def intraday(self, symbol: str, interval: str = "5m", limit: int = 300) -> list[dict]:
+        iv = _YF_INTERVAL.get(interval, "5m")
+        key = (symbol, iv)
+        now = time.time()
+        cached = self._intraday_cache.get(key)
+        if cached and (now - cached[0]) < self._refresh_s:
+            return cached[1][-limit:]
+        try:
+            from quant.data.fetch import fetch_prices
+
+            df = fetch_prices(_to_nse_yf(symbol), period=_YF_PERIOD.get(interval, "1mo"), interval=iv)
+        except Exception as exc:  # noqa: BLE001 - live feeds fail; degrade
+            log.warning("intraday_fetch_failed", extra={"symbol": symbol, "error": str(exc)})
+            return cached[1][-limit:] if cached else []
+        candles: list[dict] = []
+        for ts, row in df.iterrows():
+            t = pd.Timestamp(ts)
+            epoch = int((t.tz_localize("UTC") if t.tzinfo is None else t).timestamp())
+            candles.append({"time": epoch, "open": float(row["open"]), "high": float(row["high"]),
+                            "low": float(row["low"]), "close": float(row["close"]),
+                            "volume": float(row.get("volume", 0.0))})
+        self._intraday_cache[key] = (now, candles)
+        return candles[-limit:]
+
+
 class ResilientDataSource:
     """Caches a live source per symbol and falls back gracefully.
 
@@ -158,12 +225,32 @@ class ResilientDataSource:
     def is_live(self, symbol: str) -> bool:
         return self._live.get(symbol, False)
 
+    # Pass intraday/quote through to the primary source when it supports them
+    # (e.g. NseLiveSource); degrade quietly otherwise.
+    def intraday(self, symbol: str, interval: str = "5m", limit: int = 300) -> list[dict]:
+        fn = getattr(self._primary, "intraday", None)
+        if fn is None:
+            return []
+        try:
+            return fn(symbol, interval=interval, limit=limit)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("intraday_passthrough_failed", extra={"symbol": symbol, "error": str(exc)})
+            return []
+
+    def quote(self, symbol: str) -> float | None:
+        fn = getattr(self._primary, "quote", None)
+        return fn(symbol) if fn else None
+
 
 def build_data_source() -> DataSource:
     from ats.core.config import get_settings
 
     settings = get_settings()
     source = settings.data_source
+    if source == "nse_live":
+        # Live quotes + intraday candles (free, no key) with synthetic fallback.
+        return ResilientDataSource(NseLiveSource(), SyntheticDataSource(),
+                                   refresh_s=max(60, settings.intraday_refresh_s))
     if source == "yfinance":
         refresh = max(120, settings.market_scan_interval_s)
         return ResilientDataSource(YFinanceDataSource(), SyntheticDataSource(), refresh_s=refresh)

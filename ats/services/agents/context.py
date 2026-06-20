@@ -193,7 +193,11 @@ class ContextAssembler:
         ) / float(indicators.sma(df["close"], 50).iloc[-1])
         macro_sent = 0.0
         if self.p.nlp:
-            macro_sent = self.p.nlp.recent_sentiment("^NSEI").get("mean_score", 0.0)
+            # Overall world/market news mood (every headline feeds MARKET),
+            # falling back to the index symbol if the accessor is unavailable.
+            getter = getattr(self.p.nlp, "market_sentiment", None)
+            agg = getter() if getter else self.p.nlp.recent_sentiment("^NSEI")
+            macro_sent = agg.get("mean_score", 0.0)
         return _clip(math.tanh(gap * 10) * 0.7 + macro_sent * 0.3)
 
     @staticmethod

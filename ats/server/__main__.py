@@ -9,11 +9,13 @@ from ats.core.config import get_settings
 
 def main() -> None:
     settings = get_settings()
-    # Bind to localhost by default; never expose publicly without a VPN/Tailscale.
+    # Bind host/port from config (ATS_HOST / ATS_PORT). Default 127.0.0.1 is
+    # this-machine-only; set ATS_HOST=0.0.0.0 to serve the LAN. Never expose
+    # publicly without auth + a reverse proxy / VPN (see docs/deployment_lan.md).
     uvicorn.run(
         "ats.server.app:app",
-        host="127.0.0.1",
-        port=8000,
+        host=settings.host,
+        port=settings.port,
         reload=False,
         log_config=None,  # we configure our own structured logging
     )

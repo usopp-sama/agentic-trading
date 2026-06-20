@@ -29,6 +29,17 @@ class Settings(BaseSettings):
     env: str = "dev"
     debug: bool = True
 
+    # --- Web server (dashboard) ---
+    # host: "127.0.0.1" = this machine only (default, safest).
+    #       "0.0.0.0"   = reachable from other devices on your LAN.
+    # Never expose this directly to the public internet without auth + a
+    # reverse proxy / VPN (see docs/deployment_lan.md).
+    host: str = "127.0.0.1"
+    port: int = 8000
+    # Optional shared-secret gate for LAN access. Empty = no auth (LAN-only).
+    # When set, the dashboard requires ?token=... once (stored in a cookie).
+    dashboard_token: str = Field(default="", repr=False)
+
     # --- Storage (SQLite by default; swap to Postgres/TimescaleDB via URL) ---
     db_url: str = f"sqlite:///{DATA_DIR / 'ats.db'}"
 
@@ -68,11 +79,17 @@ class Settings(BaseSettings):
     base_currency: str = "INR"
     paper_starting_capital: float = 1_000_000.0  # Rs 10 lakh paper book
 
-    # --- Market data ("yfinance" | "synthetic" | "kite") ---
+    # --- Market data ("yfinance" | "synthetic" | "nse_live" | "kite") ---
     # Defaults to real (delayed) NSE data via yfinance; falls back to synthetic
     # per-symbol only if a live fetch fails, so it still boots offline.
+    # "nse_live" adds free intraday candles + live quotes (yfinance-backed, no
+    # key) for the Charts page; Kite drops into the same adapter later.
     data_source: str = "yfinance"
     bar_interval: str = "1d"
+    # Default intraday interval the Charts page opens with, and how often the
+    # live source refreshes its intraday cache (seconds).
+    intraday_interval: str = "5m"
+    intraday_refresh_s: int = 60
     # Pause live-source polling outside NSE hours (synthetic is exempt).
     respect_market_hours: bool = True
 

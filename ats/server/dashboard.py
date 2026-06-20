@@ -1,26 +1,37 @@
 """Dashboard mount: multi-page UI, read APIs, and the live WebSocket.
 
-Pages (all share one WebSocket stream + nav + toast notifications):
-  /           Overview      - KPIs, positions, watchlist news
-  /pipeline   Pipeline      - live flow across services, per-stage activity
-  /agents     SME Agents    - roster, opinions, leaderboard
-  /news       News          - live feed with sentiment + ticker mapping
-  /logs       Logs          - graphical event stream + per-topic rates
+Results-first pages (all share one WebSocket stream + nav + toast + theme):
+  /               Today         - LLM brief, top opportunities, portfolio, news
+  /opportunities  Opportunities - ranked setups the algos found (+ detail)
+  /charts         Charts        - live + annotated candlesticks
+  /portfolio      Portfolio     - equity curve, holdings, trade blotter
+  /news           News          - in-app reader with sentiment + filters
+  /experts        Experts       - SME chat / debate / theses / directives
+  /system         System        - pipeline + roster + event stream (the firehose)
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ats.core.db import session_scope
 from ats.core.logging import get_logger
-from ats.core.models import SmeOpinion
+from ats.core.models import (
+    Decision,
+    Fill,
+    NewsItem,
+    Ohlcv,
+    SentimentScore,
+    Signal,
+    SmeOpinion,
+)
 from ats.server.hub import get_hub
 from ats.services.dashboard.snapshot import build_snapshot
 
@@ -69,25 +80,72 @@ def _event_summary(topic: str, p: dict) -> str:
     return sym or topic
 
 
+def _redirect(target: str):
+    def _r(request: Request):
+        return RedirectResponse(target, status_code=308)
+    return _r
+
+
+# Models whose recent row count stands in for "throughput" of a pipeline stage.
+# (market = bars stored; cio has no table, so it stays session-only.)
+_STAGE_MODELS = {
+    "market": Ohlcv,
+    "news": NewsItem,
+    "nlp": SentimentScore,
+    "strategy": Signal,
+    "agents": SmeOpinion,
+    "risk": Decision,
+    "execution": Fill,
+}
+
+
+def _db_stage_counts(hours: int = 24) -> dict[str, int]:
+    """Rows written per stage in the last ``hours`` — so the pipeline is
+    informative even after a restart (in-memory counters reset) or when the
+    market is closed and nothing new is flowing this session."""
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
+    counts = {k: 0 for k, _ in STAGES}
+    try:
+        with session_scope() as s:
+            for stage, model in _STAGE_MODELS.items():
+                if model is None:
+                    continue
+                ts_col = getattr(model, "ts", None) or getattr(model, "day", None)
+                if ts_col is None:
+                    continue
+                counts[stage] = int(
+                    s.execute(
+                        select(func.count()).select_from(model).where(ts_col >= cutoff)
+                    ).scalar() or 0
+                )
+    except Exception as exc:  # noqa: BLE001 - DB counts are best-effort
+        log.warning("pipeline_db_counts_failed", extra={"error": str(exc)})
+    return counts
+
+
 def mount_dashboard(app: FastAPI) -> None:
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-    def page(name: str, title: str):
+    def page(name: str, active: str):
         def _render(request: Request):
-            return templates.TemplateResponse(request, name, {"active": title.lower()})
+            return templates.TemplateResponse(request, name, {"active": active})
         return _render
 
-    app.add_api_route("/", page("overview.html", "overview"), response_class=HTMLResponse)
-    app.add_api_route("/pipeline", page("pipeline.html", "pipeline"), response_class=HTMLResponse)
-    app.add_api_route("/agents", page("agents.html", "agents"), response_class=HTMLResponse)
+    # Results-first information architecture.
+    app.add_api_route("/", page("today.html", "today"), response_class=HTMLResponse)
+    app.add_api_route("/opportunities", page("opportunities.html", "opportunities"), response_class=HTMLResponse)
+    app.add_api_route("/charts", page("charts.html", "charts"), response_class=HTMLResponse)
+    app.add_api_route("/portfolio", page("portfolio.html", "portfolio"), response_class=HTMLResponse)
     app.add_api_route("/news", page("news.html", "news"), response_class=HTMLResponse)
-    app.add_api_route("/logs", page("logs.html", "logs"), response_class=HTMLResponse)
+    app.add_api_route("/experts", page("experts.html", "experts"), response_class=HTMLResponse)
+    app.add_api_route("/system", page("system.html", "system"), response_class=HTMLResponse)
 
-    @app.get("/experts", response_class=HTMLResponse)
-    def experts_page(request: Request):
-        return templates.TemplateResponse(request, "experts.html", {"active": "experts"})
+    # Legacy paths fold into System (pipeline/agents/logs) or Today (overview).
+    for old, target in {"/overview": "/", "/pipeline": "/system",
+                        "/agents": "/system", "/logs": "/system"}.items():
+        app.add_api_route(old, _redirect(target), response_class=RedirectResponse)
 
     @app.get("/api/dashboard")
     def dashboard_snapshot(request: Request):
@@ -98,23 +156,33 @@ def mount_dashboard(app: FastAPI) -> None:
         hub = get_hub()
         counters = hub.topic_counters()
         events = hub.recent_events(300)
-        stage_count = {k: 0 for k, _ in STAGES}
+        live_count = {k: 0 for k, _ in STAGES}
         stage_recent: dict[str, list] = {k: [] for k, _ in STAGES}
         for topic, c in counters.items():
             st = TOPIC_STAGE.get(topic)
             if st:
-                stage_count[st] += c
+                live_count[st] += c
         for e in reversed(events):
             st = TOPIC_STAGE.get(e["topic"])
             if st and len(stage_recent[st]) < 6:
                 stage_recent[st].append({"ts": e.get("ts"), "topic": e["topic"],
                                          "summary": _event_summary(e["topic"], e.get("payload", {}))})
+        db24 = _db_stage_counts(24)
         return {
             "stages": [
-                {"key": k, "label": label, "count": stage_count[k], "recent": stage_recent[k]}
+                {
+                    "key": k, "label": label,
+                    # Headline count = recent persisted throughput (survives
+                    # restarts); falls back to this session's live events.
+                    "count": max(db24.get(k, 0), live_count[k]),
+                    "live": live_count[k],
+                    "window24h": db24.get(k, 0),
+                    "recent": stage_recent[k],
+                }
                 for k, label in STAGES
             ],
             "counters": counters,
+            "window": "24h",
         }
 
     @app.get("/api/agents")

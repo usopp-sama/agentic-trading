@@ -9,6 +9,7 @@ from ats.core.config import get_settings
 from ats.core.db import session_scope
 from ats.core.logging import get_logger
 from ats.core.models import Decision, NewsItem, SentimentScore, SmeOpinion
+from ats.services.opportunities import build_opportunities
 
 log = get_logger("ats.dashboard")
 
@@ -105,6 +106,7 @@ def build_snapshot(orch) -> dict:
         "news": news[:12],
         "watchlist_news": watchlist_news,
         "sentiment_board": sentiment_board,
+        "opportunities": _safe(lambda: build_opportunities(orch, limit=8), []),
         "approvals": _safe(lambda: execution.list_pending_approvals(), []) if execution else [],
         "leaderboard": _safe(lambda: learning.leaderboard(), []) if learning else [],
         "rulebook": _safe(lambda: rules.rulebook(), []) if rules else [],

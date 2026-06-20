@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Portfolio{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="card span3 reveal"><div class="metric"><span class="lbl" data-explain="Equity: total account value = cash plus the live market value of all open positions.">Equity</span><span class="val" id="kEquity">–</span></div></div>
+  <div class="card span3 reveal"><div class="metric"><span class="lbl" data-explain="Unrealized PnL: paper profit/loss on positions you still hold, marked at the latest price. It moves until you close.">Unrealized PnL</span><span class="val" id="kUnreal">–</span></div></div>
+  <div class="card span3 reveal"><div class="metric"><span class="lbl" data-explain="Realized PnL: locked-in profit/loss from positions already closed (sells matched against buys), net of fees.">Realized PnL</span><span class="val" id="kReal">–</span></div></div>
+  <div class="card span3 reveal"><div class="metric"><span class="lbl" data-explain="Cash: uninvested buying power available to open new positions.">Cash</span><span class="val" id="kCash">–</span></div></div>
+
+  <div class="card span8 reveal">
+    <h2>Equity curve</h2>
+    <p class="sub">Paper account, in real terms</p>
+    <div class="lwc" id="equity" style="height:300px"></div>
+  </div>
+
+  <div class="card span4 reveal">
+    <h2>Holdings</h2>
+    <div style="overflow:auto;max-height:320px">
+      <table><thead><tr><th>Symbol</th><th>Qty</th><th>Mark</th><th>PnL</th></tr></thead>
+      <tbody id="holdings"><tr><td colspan="4" class="muted">No positions.</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="card span12 reveal">
+    <h2>Trade blotter</h2>
+    <p class="sub">Every paper trade and what drove it</p>
+    <div style="overflow:auto">
+      <table><thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>Value</th><th>Fees</th><th>Why</th></tr></thead>
+      <tbody id="blotter"><tr><td colspan="8" class="muted">No trades yet.</td></tr></tbody></table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block script %}
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+<script src="/static/charts.js"></script>
+<script>
+(function () {
+  const A = window.ATS;
+  function kpi(id, v, money) { A.countUp(document.getElementById(id), v || 0, { money: !!money }); }
+
+  function onSnap(s) {
+    if (!s) return;
+    const pf = s.portfolio || {};
+    kpi("kEquity", pf.equity, true); kpi("kCash", pf.cash, true);
+    const u = document.getElementById("kUnreal"); u.textContent = A.fmtMoney(pf.unrealized_pnl||0); u.className = "val " + A.signClass(pf.unrealized_pnl);
+    const r = document.getElementById("kReal"); r.textContent = A.fmtMoney(pf.realized_pnl||0); r.className = "val " + A.signClass(pf.realized_pnl);
+    const hold = document.getElementById("holdings");
+    const pos = pf.positions || [];
+    hold.innerHTML = pos.length ? pos.map((p) =>
+      `<tr><td>${A.esc(p.symbol)}</td><td>${A.esc(p.qty)}</td><td>${A.fmt(p.market_price||p.avg_price)}</td>
+       <td class="${A.signClass(p.unrealized_pnl)}">${A.fmtMoney(p.unrealized_pnl||0)}</td></tr>`).join("")
+      : '<tr><td colspan="4" class="muted">No positions.</td></tr>';
+  }
+  A.on("snapshot", onSnap);
+  A.fetchJSON("/api/dashboard").then(onSnap).catch(() => {});
+
+  A.fetchJSON("/api/trades?limit=200").then((d) => {
+    const el = document.getElementById("blotter");
+    if (!d.trades || !d.trades.length) return;
+    el.innerHTML = d.trades.map((t) =>
+      `<tr><td>${A.esc((t.ts||'').replace('T',' ').slice(0,16))}</td><td>${A.esc(t.symbol)}</td>
+        <td><span class="side ${t.side==='BUY'?'LONG':'SHORT'}">${A.esc(t.side)}</span></td>
+        <td>${A.esc(t.qty)}</td><td>${A.fmt(t.price)}</td><td>${A.fmtMoney(t.value)}</td><td>${A.fmt(t.fees)}</td>
+        <td class="muted" title="${A.esc(t.rationale)}">${A.esc((t.rationale||'').slice(0,60))}</td></tr>`).join("");
+  });
+
+  window.ATSChart && window.ATSChart.equity("equity");
+})();
+</script>
+{% endblock %}

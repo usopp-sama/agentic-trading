@@ -17,6 +17,7 @@ _FORWARD_TOPICS = [
     Topic.VOLUME_SPIKE, Topic.NEWS, Topic.SENTIMENT, Topic.SIGNAL,
     Topic.OPINION, Topic.PROPOSAL, Topic.DECISION, Topic.ORDER,
     Topic.FILL, Topic.APPROVAL_REQUEST, Topic.RULE_CHANGE, Topic.ALERT,
+    Topic.REGIME, Topic.OPTION_CHAIN,
 ]
 
 

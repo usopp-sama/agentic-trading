@@ -47,6 +47,9 @@ class AgentService:
         self._macro_personas: list[dict] = []
         self._macro_tilt: float = 0.0
         self._console: ExpertConsole | None = None
+        # Debounce macro re-evaluation driven by incoming news.
+        self._last_macro_news: float = 0.0
+        self._macro_news_min_gap_s: float = 90.0
 
     async def start(self, ctx) -> None:
         self._bus = ctx.bus
@@ -95,9 +98,27 @@ class AgentService:
             await self.run_symbol(symbol)
 
     async def _on_sentiment(self, evt) -> None:
+        # Portfolio/watchlist impact: the named tickers get a fresh symbol-scope
+        # SME read.
         for symbol in evt.payload.get("tickers", []):
             if not symbol.startswith("^"):
                 await self.run_symbol(symbol)
+        # World-market impact: any news (including ticker-less macro/world news)
+        # nudges the macro (Family B) experts to re-read the latest headlines.
+        # Debounced so a burst of items triggers a single re-evaluation.
+        await self._maybe_refresh_macro_from_news()
+
+    async def _maybe_refresh_macro_from_news(self) -> None:
+        import time
+
+        now = time.monotonic()
+        if now - self._last_macro_news < self._macro_news_min_gap_s:
+            return
+        self._last_macro_news = now
+        try:
+            await self.refresh_macro()
+        except Exception as exc:  # noqa: BLE001 - macro refresh is best-effort
+            log.warning("macro_refresh_on_news_failed", extra={"error": str(exc)})
 
     # --- macro (Family B) --------------------------------------------------
     async def refresh_macro(self) -> float:

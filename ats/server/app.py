@@ -49,15 +49,24 @@ def create_app() -> FastAPI:
 
     from ats.server.api import router as control_router
     from ats.server.experts_api import router as experts_router
+    from ats.server.results_api import router as results_router
 
     app.include_router(control_router)
     app.include_router(experts_router)
+    app.include_router(results_router)
 
     # Dashboard (HTML + websocket) is mounted if present.
     with contextlib.suppress(Exception):
         from ats.server.dashboard import mount_dashboard
 
         mount_dashboard(app)
+
+    # Optional shared-token gate for LAN deployments (off unless configured).
+    if settings.dashboard_token:
+        from ats.server.auth import TokenGateMiddleware
+
+        app.add_middleware(TokenGateMiddleware, token=settings.dashboard_token)
+        log.info("dashboard_token_gate_enabled")
 
     return app
 

@@ -2,67 +2,78 @@
 {% block title %}News{% endblock %}
 {% block content %}
 <div class="grid">
-  <div class="card span4"><h2>Ingested</h2><div id="newsCount" class="kpi">0</div><div class="muted">headlines this session</div></div>
-  <div class="card span4"><h2>Scored</h2><div id="sentCount" class="kpi">0</div><div class="muted">sentiment evaluations</div></div>
-  <div class="card span4"><h2>Watchlist Hits</h2><div id="hitCount" class="kpi">0</div><div class="muted">stories mapped to your names</div></div>
-
-  <div class="card span7">
-    <h2>Live Feed</h2><p class="sub">Headlines as they arrive. Items mapped to a watchlist name are highlighted.</p>
-    <div class="scroll" id="feed" style="max-height:520px"></div>
+  <div class="card span12 reveal">
+    <div class="charttools" style="margin:0">
+      <input id="tickerFilter" placeholder="Filter by ticker (e.g. TCS)" autocomplete="off">
+      <div class="seg" id="sentSeg">
+        <button data-s="" class="sel">All</button>
+        <button data-s="positive">Positive</button>
+        <button data-s="negative">Negative</button>
+        <button data-s="neutral">Neutral</button>
+      </div>
+      <span class="spacer"></span>
+      <span class="muted" id="newsCount"></span>
+    </div>
   </div>
-  <div class="card span5">
-    <h2>Sentiment Board</h2><p class="sub">Watchlist names ranked by recent news lean.</p>
-    <div class="scroll" id="sentBoard" style="max-height:520px"></div>
+  <div class="card span12 reveal">
+    <h2>News outlet</h2>
+    <p class="sub">Read here — no need to leave the dashboard</p>
+    <div class="newslist" id="feed"><div class="empty">Loading…</div></div>
   </div>
 </div>
-{% endblock %}
 
+<div class="reader" id="reader">
+  <button class="x icon-btn" id="readerClose">✕</button>
+  <div id="readerBody"></div>
+</div>
+{% endblock %}
 {% block script %}
 <script>
-const $=(id)=>document.getElementById(id), E=ATS.esc;
-const sc=(l)=>l==='positive'?'pos':(l==='negative'?'neg':'neu');
-let newsN=0,sentN=0,hitN=0;
-const watch=new Set();
+(function () {
+  const A = window.ATS;
+  let sentiment = "", ticker = "";
 
-function chip(s){ return s?`<span class="chip ${sc(s.label)}">${s.label} ${s.score>0?'+':''}${s.score}</span>`:''; }
-function item(n,isWatch){
-  const title=n.url?`<a href="${E(n.url)}" target="_blank" rel="noopener noreferrer">${E(n.title)}</a>`:E(n.title);
-  const ticks=((n.watch&&n.watch.length?n.watch:n.tickers)||[]).slice(0,5).map(t=>`<span class="tick">${E(t)}</span>`).join('');
-  const bg=isWatch?'style="background:rgba(77,159,255,.06);border-radius:8px;padding-left:8px"':'';
-  return `<div class="news-item" ${bg}>${title}${chip(n.sentiment)}
-    <div class="meta">${E(n.source||'')} · ${ticks||'<span class=muted>no ticker</span>'}</div></div>`;
-}
-
-function loadStatic(){
-  ATS.fetchJSON('/api/dashboard').then(d=>{
-    (d.watchlist_news||[]).forEach(n=>(n.watch||n.tickers||[]).forEach(t=>watch.add(t)));
-    const all=(d.watchlist_news||[]).concat(d.news||[]);
-    const seen=new Set(); const uniq=all.filter(n=>{const k=n.title;if(seen.has(k))return false;seen.add(k);return true;});
-    $('feed').innerHTML=uniq.map(n=>item(n,(n.watch&&n.watch.length))).join('')||'<div class="muted">No news yet.</div>';
-    newsN=uniq.length; $('newsCount').textContent=newsN;
-    hitN=(d.watchlist_news||[]).length; $('hitCount').textContent=hitN;
-    $('sentBoard').innerHTML=(d.sentiment_board||[]).map(s=>{
-      const pct=Math.min(100,Math.abs(s.mean_score)*100);
-      const color=s.label==='positive'?'var(--green)':s.label==='negative'?'var(--red)':'var(--muted)';
-      return `<div class="news-item"><b>${E(s.symbol)}</b> ${chip({label:s.label,score:s.mean_score})}
-        <span class="muted" style="float:right">${s.count} stories</span>
-        <div class="bar"><span style="width:${pct}%;background:${color}"></span></div></div>`;
-    }).join('')||'<div class="muted">No watchlist news scored yet.</div>';
-  }).catch(()=>{});
-}
-
-ATS.on('event',(m)=>{
-  if(m.topic==='news.item'){
-    const p=m.payload||{}; newsN++; $('newsCount').textContent=newsN;
-    const isWatch=(p.tickers||[]).some(t=>watch.has(t));
-    if(isWatch){ hitN++; $('hitCount').textContent=hitN; }
-    const el=document.createElement('div'); el.innerHTML=item(p,isWatch);
-    $('feed').prepend(el.firstChild);
-    while($('feed').children.length>120) $('feed').lastChild.remove();
-  } else if(m.topic==='news.sentiment'){
-    sentN++; $('sentCount').textContent=sentN;
+  async function load() {
+    const q = new URLSearchParams({ limit: 60 });
+    if (sentiment) q.set("sentiment", sentiment);
+    if (ticker) q.set("ticker", ticker);
+    const d = await A.fetchJSON("/api/news?" + q.toString());
+    const el = document.getElementById("feed");
+    document.getElementById("newsCount").textContent = (d.total || 0) + " items";
+    if (!d.news || !d.news.length) { el.innerHTML = '<div class="empty">No matching news.</div>'; return; }
+    el.innerHTML = d.news.map((n) => {
+      const s = (n.sentiment && n.sentiment.label) || "neutral";
+      return `<div class="newsrow" data-id="${n.id}"><span class="sdot ${s}"></span><div style="flex:1">
+        <div class="ttl">${A.esc(n.title)}</div>
+        <div class="sub">${A.esc(n.source)} · ${(n.tickers||[]).map(A.esc).join(", ") || "—"} · ${A.ago(n.ts)} ago
+          ${n.event_type && n.event_type!=='general' ? '· <span class="tag">'+A.esc(n.event_type)+'</span>' : ''}</div>
+        <div class="sub" style="color:var(--text);opacity:.8">${A.esc(n.summary || "")}</div>
+      </div></div>`;
+    }).join("");
+    el.querySelectorAll(".newsrow").forEach((r) => r.onclick = () => openReader(r.dataset.id));
   }
-});
-loadStatic();
+
+  async function openReader(id) {
+    const n = await A.fetchJSON("/api/news/" + id);
+    if (n.error) return;
+    const s = n.sentiment ? `<span class="sdot ${n.sentiment.label}"></span> ${A.esc(n.sentiment.label)} (${A.fmt(n.sentiment.score)})` : "";
+    document.getElementById("readerBody").innerHTML = `
+      <div class="muted" style="font-size:12px">${A.esc(n.source)} · ${A.ago(n.ts)} ago · ${s}</div>
+      <h2>${A.esc(n.title)}</h2>
+      <div>${(n.tickers||[]).map((t)=>`<a class="tag" href="/charts#${A.esc(t)}">${A.esc(t)}</a>`).join("")}</div>
+      <div class="body">${A.esc(n.body || "(no extracted body — open the source)")}</div>
+      ${n.url ? `<p style="margin-top:16px"><a href="${A.esc(n.url)}" target="_blank" rel="noopener noreferrer">Open source ↗</a></p>` : ""}`;
+    document.getElementById("reader").classList.add("open");
+  }
+  document.getElementById("readerClose").onclick = () => document.getElementById("reader").classList.remove("open");
+  document.querySelectorAll("#sentSeg button").forEach((b) => b.onclick = () => {
+    sentiment = b.dataset.s; document.querySelectorAll("#sentSeg button").forEach((x) => x.classList.toggle("sel", x === b)); load();
+  });
+  const tf = document.getElementById("tickerFilter");
+  tf.addEventListener("keydown", (e) => { if (e.key === "Enter") { ticker = tf.value.trim().toUpperCase(); load(); } });
+
+  A.on("event", (m) => { if (m.topic === "news.item") load(); });
+  load();
+})();
 </script>
 {% endblock %}
