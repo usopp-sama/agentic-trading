@@ -166,13 +166,14 @@ class MockLLMClient:
 class HttpLLMClient:  # pragma: no cover - requires a running model endpoint
     """Ollama / OpenAI-compatible client with mock fallback."""
 
-    def __init__(self, provider: str, model: str, base_url: str, api_key: str, temperature: float, timeout: float) -> None:
+    def __init__(self, provider: str, model: str, base_url: str, api_key: str, temperature: float, timeout: float, num_ctx: int = 0) -> None:
         self.provider = provider
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.temperature = temperature
         self.timeout = timeout
+        self.num_ctx = num_ctx
         self._fallback = MockLLMClient()
 
     @property
@@ -268,11 +269,16 @@ class HttpLLMClient:  # pragma: no cover - requires a running model endpoint
             parts = resp.json()["candidates"][0]["content"]["parts"]
             return "".join(p.get("text", "") for p in parts)
         if self.provider == "ollama":
+            options: dict = {"temperature": self.temperature}
+            # Override Ollama's 4096-token default so long RAG context isn't
+            # truncated. Skip when 0 to defer to Ollama's own default.
+            if self.num_ctx and self.num_ctx > 0:
+                options["num_ctx"] = self.num_ctx
             body = {
                 "model": self.model,
                 "messages": full,
                 "stream": False,
-                "options": {"temperature": self.temperature},
+                "options": options,
             }
             if json_mode:
                 body["format"] = "json"
@@ -328,6 +334,7 @@ def build_llm_client(role: str = "sme") -> LLMClient:
         api_key=s.llm_api_key,
         temperature=s.llm_temperature,
         timeout=s.llm_timeout_s,
+        num_ctx=s.llm_num_ctx,
     )
 
 

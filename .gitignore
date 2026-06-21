@@ -31,6 +31,10 @@ backups/
 *.db
 *.sqlite
 
+# Raw knowledge sources (ingested into var/knowledge; not committed)
+/library/*
+!/library/README.md
+
 # Environment & secrets
 .env
 .env.*

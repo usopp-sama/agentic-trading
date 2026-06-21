@@ -16,12 +16,20 @@ Documents are chunked by paragraph and tagged with the family they belong to
 (``A``/``B``/``C``/``RISK``) or ``all`` for shared material. Retrieval returns
 the most relevant chunks for a query, scoped to the asking expert's family plus
 the shared pool.
+
+Notes may carry a YAML front-matter block to set ``family``, ``reliability``,
+``tickers``, ``date``, ``doc_type`` and ``source`` explicitly — this is what
+``scripts/ingest_knowledge.py`` writes when cleaning raw PDFs/HTML/DOCX into
+``var/knowledge``. Files without front-matter still work (family is inferred
+from the filename prefix).
 """
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
+
+import yaml
 
 from ats.core.config import get_settings
 from ats.core.logging import get_logger
@@ -30,6 +38,10 @@ from ats.services.nlp.vectorstore import InMemoryVectorStore, get_vector_store
 log = get_logger("ats.knowledge_base")
 
 CORPUS_DIR = Path(__file__).resolve().parent / "corpus"
+# Curated, cleaned notes produced by scripts/ingest_knowledge.py. Committed to
+# git (the raw library/ sources are not) so the maintained SME library ships and
+# deploys with the repo. parents[3] == repo root.
+REPO_KNOWLEDGE_DIR = Path(__file__).resolve().parents[3] / "knowledge"
 
 # Filename prefix -> family tag. Anything else is shared ("all").
 _FAMILY_PREFIX = {
@@ -54,6 +66,58 @@ def _family_for(filename: str) -> str:
         if stem.startswith(prefix):
             return fam
     return "all"
+
+
+_FRONT_MATTER_RE = re.compile(r"^\ufeff?---[ \t]*\n(.*?)\n---[ \t]*\n", re.S)
+_VALID_FAMILIES = {"A", "B", "C", "RISK", "all"}
+
+
+def _parse_front_matter(text: str) -> tuple[dict, str]:
+    """Split a leading YAML front-matter block (``--- ... ---``) from the body.
+
+    Returns ``({}, text)`` when there is no valid front-matter so plain notes
+    keep working unchanged. YAML is parsed with ``safe_load`` only.
+    """
+    match = _FRONT_MATTER_RE.match(text)
+    if not match:
+        return {}, text
+    try:
+        meta = yaml.safe_load(match.group(1))
+    except yaml.YAMLError:
+        return {}, text
+    if not isinstance(meta, dict):
+        return {}, text
+    return meta, text[match.end():]
+
+
+def _normalize_family(value: object) -> str | None:
+    if value is None:
+        return None
+    token = str(value).strip()
+    if not token:
+        return None
+    upper = token.upper()
+    if upper == "ALL":
+        return "all"
+    return upper if upper in _VALID_FAMILIES else None
+
+
+def _coerce_reliability(value: object, default: int) -> int:
+    try:
+        score = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return max(0, min(100, score))
+
+
+def _coerce_tickers(value: object) -> list[str]:
+    if isinstance(value, str):
+        items = value.split(",")
+    elif isinstance(value, (list, tuple)):
+        items = [str(v) for v in value]
+    else:
+        return []
+    return [t.strip().upper() for t in items if str(t).strip()]
 
 
 def _chunk(text: str) -> list[tuple[str, str]]:
@@ -93,9 +157,16 @@ class KnowledgeBase:
         if self._loaded:
             return self._count
         self._ingest_dir(CORPUS_DIR, builtin=True)
-        user_dir = Path(get_settings().knowledge_dir)
-        if user_dir.exists():
-            self._ingest_dir(user_dir, builtin=False)
+        # Operator material: the committed library plus an optional local-only
+        # override dir (ATS_KNOWLEDGE_DIR). De-dup by resolved path so the same
+        # folder is never ingested twice.
+        seen = {CORPUS_DIR.resolve()}
+        for directory in (REPO_KNOWLEDGE_DIR, Path(get_settings().knowledge_dir)):
+            resolved = directory.resolve()
+            if resolved in seen or not directory.exists():
+                continue
+            self._ingest_dir(directory, builtin=False)
+            seen.add(resolved)
         if knowledge_service is not None:
             self._ingest_profiles(knowledge_service)
         self._loaded = True
@@ -106,26 +177,39 @@ class KnowledgeBase:
         if not directory.exists():
             return
         for path in sorted(directory.glob("*.md")) + sorted(directory.glob("*.txt")):
+            if path.name.lower() == "readme.md":  # folder docs, not knowledge
+                continue
             try:
-                text = path.read_text(encoding="utf-8")
+                raw = path.read_text(encoding="utf-8")
             except Exception as exc:  # noqa: BLE001
                 log.warning("kb_file_error", extra={"file": path.name, "error": str(exc)})
                 continue
-            family = _family_for(path.stem)
-            reliability = _RELIABILITY_BUILTIN if builtin else _RELIABILITY_USER
+            meta, text = _parse_front_matter(raw)
+            family = _normalize_family(meta.get("family")) or _family_for(path.stem)
+            default_rel = _RELIABILITY_BUILTIN if builtin else _RELIABILITY_USER
+            reliability = _coerce_reliability(meta.get("reliability"), default_rel)
+            source = str(meta.get("source") or path.stem)
+            tickers = _coerce_tickers(meta.get("tickers"))
+            base_meta = {
+                "kind": "kb",
+                "family": family,
+                "source": source,
+                "builtin": builtin,
+                "reliability": reliability,
+            }
+            for opt in ("date", "doc_type", "url"):
+                val = meta.get(opt)
+                if val:
+                    base_meta[opt] = str(val)
             for i, (heading, body) in enumerate(_chunk(text)):
-                doc_id = f"kb:{path.stem}:{i}"
+                chunk_meta = dict(base_meta)
+                chunk_meta["title"] = heading
+                if tickers:
+                    chunk_meta["tickers"] = tickers
                 self.store.add(
-                    doc_id,
+                    f"kb:{path.stem}:{i}",
                     f"{heading}\n{body}" if heading else body,
-                    {
-                        "kind": "kb",
-                        "family": family,
-                        "source": path.stem,
-                        "title": heading,
-                        "builtin": builtin,
-                        "reliability": reliability,
-                    },
+                    chunk_meta,
                 )
                 self._count += 1
 

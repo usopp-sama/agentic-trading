@@ -30,3 +30,9 @@ pytest>=9.0.0
 # transformers>=4.44    # FinBERT sentiment
 # sentence-transformers # embeddings for RAG
 # kiteconnect>=5.0      # Zerodha broker adapter (real money)
+
+# --- Optional: knowledge ingestion (scripts/ingest_knowledge.py) ---
+# Install on the machine that cleans raw PDFs/HTML/DOCX into var/knowledge.
+# pypdf>=4.0            # extract text from PDFs (pdfplumber is an alt fallback)
+# trafilatura>=1.6      # extract main article text from HTML
+# python-docx>=1.1      # parse .docx reports

@@ -94,6 +94,12 @@ class Settings(BaseSettings):
     llm_cio_model: str = "mock-1"  # stronger model for synthesis (tiered routing)
     llm_temperature: float = 0.1
     llm_timeout_s: float = 60.0
+    # Ollama context window (num_ctx). Ollama defaults to 4096 tokens, which
+    # silently truncates the retrieved-knowledge + DATA envelope we pass for
+    # RAG grounding. Raise for better grounding; note the KV cache grows with
+    # this, so keep it modest on memory-constrained hosts (e.g. a 16 GB box).
+    # 0 = leave Ollama's own default untouched.
+    llm_num_ctx: int = 8192
 
     # --- Trading mode + the real-money gate -------------------------------
     # mode: OFF | PAPER | APPROVAL | AUTO. v1 default PAPER.
