@@ -20,9 +20,74 @@ def _execution(request: Request):
     return orch.get("execution") if orch else None
 
 
+def _last_bar_age_s() -> float | None:
+    """Seconds since the most recent stored OHLCV bar (None if no data)."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import func, select
+
+    from ats.core.db import session_scope
+    from ats.core.models import Ohlcv
+
+    try:
+        with session_scope() as s:
+            last = s.execute(select(func.max(Ohlcv.ts))).scalar_one_or_none()
+        if last is None:
+            return None
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        return round((now - last).total_seconds(), 1)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @router.get("/health")
-def health() -> dict:
-    return {"status": "ok", "version": "0.1.0"}
+def health(request: Request) -> dict:
+    """Rich liveness/readiness probe for an unattended run.
+
+    Reports DB reachability, orchestrator status, the live-vs-synthetic feed
+    ratio, last-bar age, the kill switch, and whether SME reasoning is really
+    live. ``status`` is ``degraded`` if anything material is wrong so a simple
+    cron/uptime check can alert.
+    """
+    out: dict = {"status": "ok", "version": "0.1.0"}
+    orch = getattr(request.app.state, "orchestrator", None)
+
+    # DB ping
+    db_ok = True
+    try:
+        from sqlalchemy import text
+
+        from ats.core.db import session_scope
+
+        with session_scope() as s:
+            s.execute(text("SELECT 1"))
+    except Exception:  # noqa: BLE001
+        db_ok = False
+    out["db_ok"] = db_ok
+
+    out["kill_switch"] = state.is_killed()
+    out["mode"] = state.get_mode()
+    out["last_bar_age_s"] = _last_bar_age_s()
+
+    if orch is not None:
+        out["orchestrator"] = {
+            "started": bool(getattr(orch, "_started", False)),
+            "services": len(getattr(orch, "services", [])),
+        }
+        md = orch.get("market_data")
+        if md is not None and hasattr(md, "data_status"):
+            out["feed"] = md.data_status()
+        agents = orch.get("agents")
+        if agents is not None and hasattr(agents, "llm_status"):
+            out["llm"] = agents.llm_status()
+        wd = orch.get("watchdog")
+        if wd is not None and hasattr(wd, "status"):
+            out["watchdog"] = wd.status()
+
+    feed_degraded = bool(out.get("feed", {}).get("degraded"))
+    if (not db_ok) or out["kill_switch"] or feed_degraded:
+        out["status"] = "degraded"
+    return out
 
 
 @router.get("/state")

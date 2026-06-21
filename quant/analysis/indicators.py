@@ -133,6 +133,52 @@ def donchian(df: pd.DataFrame, window: int = 20) -> pd.DataFrame:
     return pd.DataFrame({"upper": upper, "lower": lower, "mid": mid})
 
 
+def adx(df: pd.DataFrame, window: int = 14) -> pd.DataFrame:
+    """Average Directional Index with +DI / -DI (Wilder).
+
+    Expects ``high``, ``low``, ``close`` columns. Returns a DataFrame with
+    ``plus_di``, ``minus_di`` and ``adx``. ADX measures trend *strength*
+    (direction-agnostic); +DI vs -DI gives the direction. A common filter is
+    "trade only when ADX > 20-25" so trend signals are ignored in chop.
+    """
+    _validate_window(window)
+    high, low, close = df["high"], df["low"], df["close"]
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+    plus_dm = pd.Series(plus_dm, index=df.index)
+    minus_dm = pd.Series(minus_dm, index=df.index)
+
+    prev_close = close.shift(1)
+    tr = pd.concat(
+        [high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1
+    ).max(axis=1)
+    alpha = 1.0 / window
+    atr_ = tr.ewm(alpha=alpha, adjust=False, min_periods=window).mean()
+    plus_di = 100.0 * plus_dm.ewm(alpha=alpha, adjust=False, min_periods=window).mean() / atr_
+    minus_di = 100.0 * minus_dm.ewm(alpha=alpha, adjust=False, min_periods=window).mean() / atr_
+    di_sum = (plus_di + minus_di).replace(0.0, np.nan)
+    dx = 100.0 * (plus_di - minus_di).abs() / di_sum
+    adx_ = dx.ewm(alpha=alpha, adjust=False, min_periods=window).mean()
+    return pd.DataFrame({"plus_di": plus_di, "minus_di": minus_di, "adx": adx_})
+
+
+def keltner_channel(
+    df: pd.DataFrame, window: int = 20, atr_window: int = 10, mult: float = 2.0
+) -> pd.DataFrame:
+    """Keltner channel: an EMA midline with ATR-scaled bands.
+
+    Returns ``upper``, ``mid``, ``lower``. Unlike Bollinger bands (std-based),
+    the width tracks true range, so it is less distorted by gaps. Used here for
+    volatility-normalized mean reversion (distance from the mid in ATR units).
+    """
+    _validate_window(window)
+    mid = ema(df["close"], window)
+    rng = atr(df, atr_window)
+    return pd.DataFrame({"upper": mid + mult * rng, "mid": mid, "lower": mid - mult * rng})
+
+
 def _validate_window(window: int) -> None:
     if not isinstance(window, (int, np.integer)) or window < 1:
         raise ValueError(f"window must be a positive integer, got {window!r}")

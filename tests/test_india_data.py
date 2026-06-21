@@ -55,8 +55,12 @@ def test_synthetic_chain_summary_is_sane():
     assert 0.7 <= s.pcr <= 1.3
     assert abs(s.atm_strike - 250.0) <= 250.0 * 0.02
     assert s.source == "synthetic"
-    # Deterministic within a day.
-    assert SyntheticOptionChain().fetch("NIFTY", spot=250.0) == s
+    # Deterministic within a day for the priced fields (the ``ts`` snapshot
+    # stamp is wall-clock and intentionally differs between calls).
+    from dataclasses import replace
+
+    again = SyntheticOptionChain().fetch("NIFTY", spot=250.0)
+    assert replace(again, ts=s.ts) == s
 
 
 def test_synthetic_chain_defaults_without_spot():

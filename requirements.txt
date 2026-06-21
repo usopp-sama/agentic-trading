@@ -4,6 +4,7 @@ pandas>=3.0.0
 numpy>=2.4.0
 scipy>=1.17.0
 matplotlib>=3.10.0
+pyarrow>=18.0.0       # Parquet export of daily strategy/SME research metrics
 
 # Server (ats/)
 fastapi>=0.136.0

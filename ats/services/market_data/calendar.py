@@ -46,7 +46,33 @@ NSE_HOLIDAYS: dict[int, frozenset[date]] = {
             date(2026, 12, 25),  # Christmas
         }
     ),
+    # PROVISIONAL: the official NSE 2027 circular is not published yet. These
+    # are best-effort dates (fixed national holidays are reliable; festival
+    # dates are estimates) so the engine keeps a sane calendar past the 2026
+    # paper run. VERIFY and replace from the NSE 2027 holiday circular.
+    2027: frozenset(
+        {
+            date(2027, 1, 26),   # Republic Day (fixed)
+            date(2027, 3, 22),   # Holi (provisional)
+            date(2027, 3, 26),   # Good Friday (provisional)
+            date(2027, 4, 14),   # Dr. Baba Saheb Ambedkar Jayanti (fixed)
+            date(2027, 4, 15),   # Shri Ram Navami (provisional)
+            date(2027, 8, 15),   # Independence Day (fixed; a Sunday in 2027)
+            date(2027, 10, 2),   # Mahatma Gandhi Jayanti (fixed; a Saturday)
+            date(2027, 11, 5),   # Diwali / Balipratipada (provisional)
+            date(2027, 12, 25),  # Christmas (fixed; a Saturday)
+        }
+    ),
 }
+
+# Years whose holiday list is best-effort (not from the official circular).
+# Callers can warn so an operator knows to refresh the dates.
+PROVISIONAL_YEARS: frozenset[int] = frozenset({2027})
+
+
+def is_provisional_year(year: int) -> bool:
+    """True if this year's holiday list is an estimate, not the NSE circular."""
+    return year in PROVISIONAL_YEARS
 
 
 def to_ist(dt: datetime) -> datetime:

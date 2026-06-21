@@ -74,6 +74,13 @@ class StrategyService:
                 setter = getattr(strat, "set_fundamentals", None)
                 if setter is not None:
                     setter(fundamentals.all_latest)
+        # Wire the NLP sentiment oracle into any sentiment-driven strategy.
+        nlp = ctx.orchestrator.get("nlp")
+        if nlp is not None:
+            for strat in self._strategies:
+                setter = getattr(strat, "set_sentiment", None)
+                if setter is not None:
+                    setter(nlp.recent_sentiment)
         ctx.bus.subscribe(Topic.BAR, self._on_bar)
 
     async def _on_bar(self, evt) -> None:
@@ -89,7 +96,8 @@ class StrategyService:
 
         # 2) Per-symbol strategies.
         for strat in self._strategies:
-            if self._status.get(strat.id) == "paused":
+            status = self._status.get(strat.id)
+            if status == "paused":
                 continue
             try:
                 sig = strat.evaluate(symbol, df)
@@ -98,7 +106,7 @@ class StrategyService:
                 continue
             if sig is None:
                 continue
-            await self._handle_signal(sig, strat.style)
+            await self._handle_signal(sig, strat.style, shadow=(status == "shadow"))
 
         # 3) Universe strategies, once per poll cycle (on the last symbol's
         # bar, when every history in the cycle is fresh).
@@ -108,7 +116,8 @@ class StrategyService:
 
     async def _run_universe_strategies(self, watchlist: list[str]) -> None:
         for strat in self._universe_strategies:
-            if self._status.get(strat.id) == "paused":
+            status = self._status.get(strat.id)
+            if status == "paused":
                 continue
             needed = strat.symbols() or watchlist
             history: dict[str, pd.DataFrame] = {}
@@ -122,9 +131,11 @@ class StrategyService:
                 log.warning("strategy_error", extra={"strategy": strat.id, "error": str(exc)})
                 continue
             for sig in signals:
-                await self._handle_signal(sig, strat.style)
+                await self._handle_signal(sig, strat.style, shadow=(status == "shadow"))
 
-    async def _handle_signal(self, sig: SignalModel, style: str) -> None:
+    async def _handle_signal(
+        self, sig: SignalModel, style: str, shadow: bool = False
+    ) -> None:
         # Regime tilt: dampen conviction when the style mismatches the
         # current market regime (never boost; see quant.analysis.regime).
         if self._regime is not None and sig.conviction > 0:
@@ -163,8 +174,11 @@ class StrategyService:
         per_symbol[sig.strategy] = sig
         changed = prev is None or prev.stance != sig.stance
         if sig.stance != Stance.NEUTRAL and changed:
+            # Shadow strategies are recorded (track record + dashboard) but do
+            # NOT publish to the bus, so they never reach risk/execution and
+            # take no capital until promoted to "paper" by the backtest gate.
             self._persist(sig)
-            if self._bus is not None:
+            if self._bus is not None and not shadow:
                 await self._bus.publish(Topic.SIGNAL, sig.model_dump(mode="json"))
 
     # --- sleeves -------------------------------------------------------------

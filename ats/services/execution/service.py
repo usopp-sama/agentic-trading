@@ -9,7 +9,7 @@ Phase 7 without changing this service's external surface.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 
@@ -73,11 +73,30 @@ class ExecutionService:
 
         from ats.core.config import get_settings
 
+        settings = get_settings()
         ctx.scheduler.add_job(
             self.record_equity, "interval",
-            seconds=max(60, get_settings().market_scan_interval_s),
+            seconds=max(60, settings.market_scan_interval_s),
             id="equity_snapshot", max_instances=1, coalesce=True,
         )
+
+        # Daily digest pushed shortly after the NSE close (IST), so an
+        # unattended run reports each day's outcome over the notify channel.
+        from ats.services.market_data.calendar import IST
+
+        ctx.scheduler.add_job(
+            self.push_daily_digest, "cron",
+            hour=settings.digest_hour, minute=settings.digest_minute, timezone=IST,
+            id="daily_digest", max_instances=1, coalesce=True,
+        )
+
+    def _feed_degraded(self) -> bool:
+        from ats.core.config import get_settings
+
+        if not get_settings().feed_halt_entries_on_degrade:
+            return False
+        healthy_fn = getattr(self._md, "feed_healthy", None)
+        return bool(healthy_fn is not None and not healthy_fn())
 
     # --- price oracle ------------------------------------------------------
     def price_of(self, symbol: str) -> float | None:
@@ -107,6 +126,13 @@ class ExecutionService:
             return {"status": "BLOCKED", "reason": route.reason}
 
         side = "BUY" if action == "BUY" else "SELL"
+
+        # Feed-integrity gate: never OPEN new exposure on a degraded (mostly
+        # synthetic) live feed. Exits (SELL) are always allowed so positions can
+        # still be managed when data is poor.
+        if side == "BUY" and self._feed_degraded():
+            log.warning("entry_blocked_feed_degraded", extra={"symbol": symbol})
+            return {"status": "BLOCKED", "reason": "feed_degraded"}
         price = self.price_of(symbol) or 0.0
         draft = Draft(
             decision_id=decision.get("decision_id"),
@@ -254,3 +280,46 @@ class ExecutionService:
             row.gross = round(net + fees, 2)
             row.drawdown = round(drawdown, 4)
         return {"equity": equity, "drawdown": round(drawdown, 4)}
+
+    def push_daily_digest(self) -> dict:
+        """Compose and send an end-of-day summary over the notify channel.
+
+        Skipped on non-trading days. Refreshes the equity row first so the
+        numbers reflect the close.
+        """
+        from ats.services.market_data.calendar import is_trading_day
+
+        today = date.today()
+        if not is_trading_day(today):
+            return {"skipped": "not_trading_day"}
+        try:
+            self.record_equity()
+        except Exception as exc:  # noqa: BLE001 - digest must not raise in cron
+            log.warning("digest_record_equity_failed", extra={"error": str(exc)})
+        snap = self.get_snapshot()
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
+        with session_scope() as s:
+            row = s.execute(
+                select(PnlDaily).where(
+                    PnlDaily.account == self.account, PnlDaily.day == today
+                )
+            ).scalar_one_or_none()
+            fills_24h = int(
+                s.execute(
+                    select(func.count(Fill.id))
+                    .join(Order, Fill.order_id == Order.id)
+                    .where(Order.account == self.account, Fill.ts >= cutoff)
+                ).scalar_one()
+                or 0
+            )
+        net = float(row.net) if row else 0.0
+        dd = float(row.drawdown) if row else 0.0
+        cur = "Rs"
+        msg = (
+            f"Daily digest {today.isoformat()}: equity {cur}{snap['equity']:,.0f} | "
+            f"net P&L {cur}{net:+,.0f} | drawdown {dd * 100:.1f}% | "
+            f"{fills_24h} fills (24h) | {len(snap['positions'])} open positions."
+        )
+        notify(msg)
+        log.info("daily_digest", extra={"net": round(net, 2), "fills_24h": fills_24h})
+        return {"digest": msg, "net": net, "fills_24h": fills_24h}

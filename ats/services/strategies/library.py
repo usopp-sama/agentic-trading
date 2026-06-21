@@ -525,15 +525,82 @@ class NavPremium(UniverseStrategy):
 
 
 def default_strategies() -> list[Strategy]:
+    from ats.core.config import get_settings
+    from ats.services.strategies.library_events import (
+        NewsSentimentMomentum,
+        PostEarningsDrift,
+        TurnOfMonth,
+        VolatilityTarget,
+    )
+    from ats.services.strategies.library_trend_mr import (
+        FiftyTwoWeekHigh,
+        MacdAdxTrend,
+        OuKeltnerReversion,
+    )
+
+    s = get_settings()
     return [
+        # Original v1 sleeves (paper).
         SmaCrossover(),
         BollingerMeanReversion(),
         VolumeBreakout(),
         DonchianTrend(),
         Rsi2MeanReversion(),
         TimeSeriesMomentum(),
+        # Phase-2 per-symbol additions (shadow until the backtest gate clears).
+        FiftyTwoWeekHigh(buy_near=s.high52_buy_near, sell_near=s.high52_sell_near),
+        MacdAdxTrend(adx_min=s.macd_adx_min),
+        OuKeltnerReversion(
+            ema_window=s.ou_keltner_ema, atr_window=s.ou_keltner_atr,
+            z_entry=s.ou_keltner_z_entry, z_exit=s.ou_keltner_z_exit,
+        ),
+        PostEarningsDrift(gap_z=s.pead_gap_z, drift_days=s.pead_drift_days),
+        NewsSentimentMomentum(
+            buy_score=s.news_sent_buy, sell_score=s.news_sent_sell,
+            min_count=s.news_sent_min_count,
+        ),
+        TurnOfMonth(days_before=s.tom_days_before, days_after=s.tom_days_after),
+        VolatilityTarget(target_vol=s.vol_target_annual, max_vol=s.vol_target_max),
     ]
 
 
 def default_universe_strategies() -> list[UniverseStrategy]:
-    return [PairsZScore(), FactorComposite(), NavPremium()]
+    from ats.core.config import get_settings
+    from ats.services.strategies.library_factors import (
+        CointegrationPairs,
+        LowVolBAB,
+        QualityFactor,
+        SizeFactor,
+        ValueFactor,
+    )
+    from ats.services.strategies.library_trend_mr import (
+        CrossSectionalMomentum,
+        DualMomentum,
+        ShortTermReversal,
+    )
+
+    s = get_settings()
+    top_n, rb = s.factor_sleeve_top_n, s.factor_sleeve_rebalance_days
+    return [
+        # Original v1 universe sleeves (paper).
+        PairsZScore(),
+        FactorComposite(),
+        NavPremium(),
+        # Phase-2 cross-sectional additions (shadow).
+        CrossSectionalMomentum(
+            formation=s.xs_mom_formation, skip=s.xs_mom_skip,
+            decile=s.xs_mom_decile, rebalance_days=s.xs_mom_rebalance_days,
+        ),
+        DualMomentum(lookback=s.dual_mom_lookback, top_n=s.dual_mom_top_n,
+                     rebalance_days=s.xs_mom_rebalance_days),
+        ShortTermReversal(lookback=s.st_reversal_lookback, decile=s.st_reversal_decile),
+        ValueFactor(top_n=top_n, rebalance_calendar_days=rb),
+        QualityFactor(top_n=top_n, rebalance_calendar_days=rb),
+        SizeFactor(top_n=top_n, rebalance_calendar_days=rb),
+        LowVolBAB(top_n=top_n, rebalance_calendar_days=rb),
+        CointegrationPairs(
+            formation=s.coint_formation, z_window=s.coint_z_window,
+            entry_z=s.coint_entry_z, exit_z=s.coint_exit_z,
+            reselect_days=s.coint_reselect_days,
+        ),
+    ]

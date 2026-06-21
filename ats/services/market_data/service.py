@@ -9,6 +9,8 @@ agents).
 
 from __future__ import annotations
 
+from datetime import date
+
 import numpy as np
 import pandas as pd
 from sqlalchemy import select
@@ -17,7 +19,7 @@ from ats.core.db import session_scope
 from ats.core.events import EventBus, Topic
 from ats.core.logging import get_logger
 from ats.core.models import Instrument
-from ats.services.market_data.calendar import is_polling_window
+from ats.services.market_data.calendar import is_polling_window, is_provisional_year
 from ats.services.market_data.sources import build_data_source
 from ats.services.market_data.store import load_history, upsert_bars
 
@@ -38,6 +40,7 @@ class MarketDataService:
         self._last_price: dict[str, float] = {}
         self._symbols: list[str] = []
         self._closed_logged = False
+        self._was_degraded = False
 
     # --- lifecycle ---------------------------------------------------------
     async def start(self, ctx) -> None:
@@ -80,6 +83,30 @@ class MarketDataService:
                 await self._poll_symbol(symbol)
             except Exception as exc:  # noqa: BLE001
                 log.warning("poll_failed", extra={"symbol": symbol, "error": str(exc)})
+        await self._check_feed_degradation()
+
+    async def _check_feed_degradation(self) -> None:
+        """Alert once when the live feed degrades to mostly-synthetic, and once
+        when it recovers. New entries are halted while degraded (enforced in the
+        execution service via ``feed_healthy``)."""
+        status = self.data_status()
+        degraded = bool(status.get("degraded"))
+        if degraded and not self._was_degraded:
+            log.warning("feed_degraded", extra=status)
+            if self._bus is not None:
+                await self._bus.publish(
+                    Topic.ALERT,
+                    {"kind": "feed", "reason": "live feed degraded to synthetic fallback",
+                     "live": status["live"], "total": status["total"], "ratio": status["ratio"]},
+                )
+        elif not degraded and self._was_degraded:
+            log.info("feed_recovered", extra=status)
+            if self._bus is not None:
+                await self._bus.publish(
+                    Topic.ALERT, {"kind": "feed", "reason": "live feed recovered",
+                                  "ratio": status["ratio"]},
+                )
+        self._was_degraded = degraded
 
     def _market_closed(self) -> bool:
         """Gate LIVE sources to NSE hours; synthetic keeps flowing for dev."""
@@ -170,16 +197,42 @@ class MarketDataService:
         return self._symbols
 
     def data_status(self) -> dict:
-        """Report how many symbols are on the live feed vs synthetic fallback."""
+        """Report how many symbols are on the live feed vs synthetic fallback,
+        plus a ``degraded`` flag (live source expected this session, but most
+        symbols fell back to synthetic)."""
+        from ats.core.config import get_settings
+
+        settings = get_settings()
+        total = len(self._symbols)
+        in_session = is_polling_window()
         is_live = getattr(self.source, "is_live", None)
         if is_live is None:
-            return {"mode": "synthetic", "live": 0, "total": len(self._symbols)}
+            # Pure synthetic source: intentional, never "degraded".
+            return {"mode": "synthetic", "live": 0, "total": total, "ratio": 0.0,
+                    "degraded": False, "in_session": in_session,
+                    "provisional_calendar": is_provisional_year(date.today().year)}
         live = sum(1 for s in self._symbols if is_live(s))
+        ratio = (live / total) if total else 0.0
+        degraded = bool(
+            settings.data_source != "synthetic"
+            and in_session
+            and total > 0
+            and ratio < settings.feed_min_live_ratio
+        )
         return {
             "mode": "live" if live else "synthetic",
             "live": live,
-            "total": len(self._symbols),
+            "total": total,
+            "ratio": round(ratio, 3),
+            "degraded": degraded,
+            "in_session": in_session,
+            "provisional_calendar": is_provisional_year(date.today().year),
         }
+
+    def feed_healthy(self) -> bool:
+        """False when the live feed has degraded to mostly-synthetic in-session.
+        Used by execution to halt NEW entries on bad data."""
+        return not self.data_status().get("degraded", False)
 
     @staticmethod
     def _load_watchlist() -> list[str]:

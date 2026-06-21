@@ -29,6 +29,28 @@ class Settings(BaseSettings):
     env: str = "dev"
     debug: bool = True
 
+    # --- Logging (stdout always; optional rotating file for unattended runs) ---
+    log_to_file: bool = True
+    log_dir: str = str(DATA_DIR / "logs")
+    log_max_bytes: int = 10_000_000   # ~10 MB per file
+    log_backup_count: int = 10        # keep 10 rotations (~100 MB ceiling)
+    # Daily digest push (IST 24h clock) shortly after the 15:30 close + settle.
+    digest_hour: int = 15
+    digest_minute: int = 45
+
+    # --- Learning attribution + research metrics ---
+    # Forward-return horizon used to score an SME's directional call. An
+    # attribution is only resolved once this many calendar days have elapsed
+    # since the fill (in-flight attributions live in the DB, so they survive
+    # restarts). Set to 0 to score on the next evaluation tick (legacy behavior).
+    learning_horizon_days: int = 5
+    # Daily export of per-strategy and per-SME metrics to var/metrics/*.parquet
+    # plus an append-only research log of active params + rolling performance.
+    metrics_export_enabled: bool = True
+    metrics_dir: str = str(DATA_DIR / "metrics")
+    metrics_export_hour: int = 16
+    metrics_export_minute: int = 0
+
     # --- Web server (dashboard) ---
     # host: "127.0.0.1" = this machine only (default, safest).
     #       "0.0.0.0"   = reachable from other devices on your LAN.
@@ -95,6 +117,11 @@ class Settings(BaseSettings):
     intraday_refresh_s: int = 60
     # Pause live-source polling outside NSE hours (synthetic is exempt).
     respect_market_hours: bool = True
+    # Feed integrity: when a live source is configured and we are in-session,
+    # the feed is "degraded" if fewer than this fraction of symbols are on the
+    # real feed (the rest fell back to synthetic). Degradation halts NEW entries.
+    feed_min_live_ratio: float = 0.5
+    feed_halt_entries_on_degrade: bool = True
 
     # --- Fundamentals ("synthetic" | "yfinance"; "auto" follows data_source) ---
     fundamentals_source: str = "auto"
@@ -145,7 +172,9 @@ class Settings(BaseSettings):
 
     # --- Watchdog (dead-man's switch; roadmap Part 10) ---
     watchdog_interval_s: int = 60
-    watchdog_stale_after_s: int = 600     # bar silence tolerated before unhealthy
+    # Bar silence tolerated before unhealthy. 15 min absorbs yfinance delay /
+    # rate-limit hiccups during a real session without false-tripping.
+    watchdog_stale_after_s: int = 900
     watchdog_auto_kill: bool = True       # engage kill switch on sustained failure
     watchdog_kill_after_failures: int = 3 # consecutive unhealthy checks
 
@@ -163,6 +192,53 @@ class Settings(BaseSettings):
     vol_sleeve_capital: float = 100_000.0 # ~10% of the Rs 10 lakh paper book
     nifty_strike_step: float = 50.0
     nifty_lot_size: int = 75
+
+    # --- Strategy library tunables (the "variables" to fine-tune over the run) ---
+    # These drive the shadow strategies added for the month-long paper test so
+    # lookbacks/thresholds are config, not code edits. All start as shadow
+    # (signals logged, no capital) until the backtest gate promotes them.
+    # Cross-sectional / dual momentum
+    xs_mom_formation: int = 252
+    xs_mom_skip: int = 21
+    xs_mom_decile: float = 0.2
+    xs_mom_rebalance_days: int = 21
+    dual_mom_lookback: int = 252
+    dual_mom_top_n: int = 5
+    # 52-week high
+    high52_buy_near: float = 0.95
+    high52_sell_near: float = 0.75
+    # MACD + ADX trend
+    macd_adx_min: float = 20.0
+    # Short-term reversal
+    st_reversal_lookback: int = 5
+    st_reversal_decile: float = 0.2
+    # OU / Keltner reversion
+    ou_keltner_ema: int = 20
+    ou_keltner_atr: int = 10
+    ou_keltner_z_entry: float = 1.0
+    ou_keltner_z_exit: float = 0.3
+    # Single-factor sleeves
+    factor_sleeve_top_n: int = 8
+    factor_sleeve_rebalance_days: int = 90
+    # Cointegration pairs
+    coint_formation: int = 252
+    coint_z_window: int = 60
+    coint_entry_z: float = 2.0
+    coint_exit_z: float = 0.5
+    coint_reselect_days: int = 21
+    # Post-earnings drift (price-proxy)
+    pead_gap_z: float = 2.5
+    pead_drift_days: int = 10
+    # News-sentiment momentum
+    news_sent_buy: float = 0.25
+    news_sent_sell: float = -0.25
+    news_sent_min_count: int = 3
+    # Turn-of-month seasonality
+    tom_days_before: int = 1
+    tom_days_after: int = 3
+    # Volatility-target overlay
+    vol_target_annual: float = 0.15
+    vol_target_max: float = 0.60
 
     @property
     def is_real_money_active(self) -> bool:

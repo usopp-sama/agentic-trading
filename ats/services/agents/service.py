@@ -85,7 +85,7 @@ class AgentService:
         from ats.core.config import get_settings
 
         ctx.scheduler.add_job(
-            self.refresh_macro, "interval",
+            self._scheduled_macro_sweep, "interval",
             seconds=max(300, get_settings().agent_cycle_interval_s * 3),
             id="agent_macro", max_instances=1, coalesce=True,
         )
@@ -122,6 +122,17 @@ class AgentService:
             await self.refresh_macro()
         except Exception as exc:  # noqa: BLE001 - macro refresh is best-effort
             log.warning("macro_refresh_on_news_failed", extra={"error": str(exc)})
+
+    async def _scheduled_macro_sweep(self) -> None:
+        """Periodic macro refresh, gated to the NSE session. News arriving at
+        any hour still triggers a macro re-read via ``_maybe_refresh_macro_from_news``;
+        this only skips the *redundant* clock-driven sweep when the market is shut."""
+        from ats.core.config import get_settings
+        from ats.services.market_data.calendar import is_polling_window
+
+        if get_settings().respect_market_hours and not is_polling_window():
+            return
+        await self.refresh_macro()
 
     # --- macro (Family B) --------------------------------------------------
     async def refresh_macro(self) -> float:

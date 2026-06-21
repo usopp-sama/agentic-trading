@@ -2,7 +2,17 @@
 
 Sells an iron condor on NIFTY when implied volatility is rich versus
 realized (the documented volatility risk premium), using the options
-paper book. The roadmap's hard rules are enforced in code, not policy:
+paper book.
+
+Academic rationale — the **variance risk premium** (Carr & Wu, 2009, RFS):
+option-implied variance is, on average, higher than subsequently realized
+variance, so a systematic short-volatility position (here, a defined-risk iron
+condor) harvests that premium. The trade-off is negatively skewed payoffs —
+small steady credits punctuated by occasional large losses — which is exactly
+why the rules below cap risk and forbid entries in crisis regimes. This sleeve
+is the project's expression of the short-vol / VRP factor.
+
+The roadmap's hard rules are enforced in code, not policy:
 
 - **Defined-risk only**: the book can only open credit spreads whose
   worst case is reserved as margin up front. Naked anything is

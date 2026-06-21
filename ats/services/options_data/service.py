@@ -17,6 +17,7 @@ from __future__ import annotations
 from ats.core.config import get_settings
 from ats.core.events import EventBus, Topic
 from ats.core.logging import get_logger
+from ats.services.market_data.calendar import is_polling_window
 from ats.services.market_data.option_chain import build_option_chain_source
 from quant.analysis.indicators import annualized_volatility
 
@@ -49,6 +50,16 @@ class OptionsDataService:
 
     async def poll(self) -> None:
         settings = get_settings()
+        # The option-chain IV/PCR snapshot is only meaningful during the NSE
+        # session. Outside the polling window (and on a real chain source) skip
+        # the poll instead of churning the live endpoint 24/7. Synthetic chains
+        # keep flowing so dev/offline runs still exercise the sleeve.
+        if (
+            settings.respect_market_hours
+            and settings.option_chain_source != "synthetic"
+            and not is_polling_window()
+        ):
+            return
         ref = settings.regime_reference_symbol
         spot = self._md.latest_price(ref) if self._md is not None else None
         summary = self.source.fetch(settings.option_chain_symbol, spot=spot)

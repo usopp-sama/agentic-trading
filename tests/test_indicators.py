@@ -100,3 +100,29 @@ def test_donchian_bands_ordered(ohlcv):
     ch = indicators.donchian(ohlcv, 20).dropna()
     assert (ch["upper"] >= ch["mid"]).all()
     assert (ch["mid"] >= ch["lower"]).all()
+
+
+def test_adx_high_in_strong_trend_low_in_chop():
+    n = 120
+    trend = pd.Series(100.0 + 1.5 * np.arange(n))
+    df_trend = pd.DataFrame({"high": trend + 0.5, "low": trend - 0.5, "close": trend})
+    rng = np.random.default_rng(1)
+    chop = pd.Series(100.0 + np.cumsum(rng.normal(0.0, 0.1, n)))
+    df_chop = pd.DataFrame({"high": chop + 0.5, "low": chop - 0.5, "close": chop})
+    assert float(indicators.adx(df_trend, 14)["adx"].iloc[-1]) > 40.0
+    assert float(indicators.adx(df_chop, 14)["adx"].iloc[-1]) < 35.0
+
+
+def test_adx_direction_matches_trend():
+    n = 120
+    up = pd.Series(100.0 + 1.0 * np.arange(n))
+    df = pd.DataFrame({"high": up + 0.5, "low": up - 0.5, "close": up})
+    dmi = indicators.adx(df, 14)
+    assert float(dmi["plus_di"].iloc[-1]) > float(dmi["minus_di"].iloc[-1])
+
+
+def test_keltner_bands_ordered_and_atr_scaled(ohlcv):
+    kc = indicators.keltner_channel(ohlcv, 20, 10, 2.0).dropna()
+    assert len(kc) > 0
+    assert (kc["upper"] >= kc["mid"]).all()
+    assert (kc["mid"] >= kc["lower"]).all()

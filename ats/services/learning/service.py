@@ -10,8 +10,11 @@ feedback loop that changes who gets influence) is the point.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import select
 
+from ats.core import state
 from ats.core.db import session_scope
 from ats.core.events import Topic
 from ats.core.logging import get_logger
@@ -19,6 +22,10 @@ from ats.core.models import Attribution, Decision, SmeTrackRecord
 from ats.services.learning.scoring import promotion_decision, update_record
 
 log = get_logger("ats.learning")
+
+# KvState key recording the attribution config in force (auditable across
+# restarts; in-flight attributions themselves persist in the DB).
+_HORIZON_KEY = "learning.horizon_days"
 
 
 def _sign(x: float) -> int:
@@ -30,15 +37,25 @@ class LearningService:
 
     def __init__(self) -> None:
         self._md = None
+        self._horizon_days = 5
 
     async def start(self, ctx) -> None:
         self._md = ctx.orchestrator.get("market_data")
-        ctx.bus.subscribe(Topic.FILL, self._on_fill)
         from ats.core.config import get_settings
 
+        settings = get_settings()
+        self._horizon_days = max(0, settings.learning_horizon_days)
+        # Snapshot the active attribution config (auditable; restart-safe).
+        prev = state.get_kv(_HORIZON_KEY).get("days")
+        if prev is not None and int(prev) != self._horizon_days:
+            log.info("learning_horizon_changed",
+                     extra={"from": prev, "to": self._horizon_days})
+        state.set_kv(_HORIZON_KEY, {"days": self._horizon_days})
+
+        ctx.bus.subscribe(Topic.FILL, self._on_fill)
         ctx.scheduler.add_job(
             self.evaluate, "interval",
-            seconds=max(120, get_settings().agent_cycle_interval_s * 2),
+            seconds=max(120, settings.agent_cycle_interval_s * 2),
             id="learning_eval", max_instances=1, coalesce=True,
         )
 
@@ -61,15 +78,28 @@ class LearningService:
             )
 
     def evaluate(self, force: bool = False) -> dict:
-        """Resolve outstanding attributions against subsequent price moves."""
+        """Resolve attributions whose forward-return horizon has elapsed.
+
+        An attribution is scored only once ``learning_horizon_days`` have passed
+        since the fill, so the SME's call is judged on a meaningful horizon (5d
+        swing by default) rather than the next price tick. ``force`` bypasses
+        the horizon for tests/manual evaluation. In-flight (unevaluated) rows
+        live in the DB, so a mid-month restart resumes them without loss.
+        """
         if self._md is None:
             return {"evaluated": 0}
+        cutoff = None
+        if not force and self._horizon_days > 0:
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            cutoff = now - timedelta(days=self._horizon_days)
         evaluated = 0
         with session_scope() as s:
             rows = s.execute(
                 select(Attribution).where(Attribution.evaluated.is_(False))
             ).scalars().all()
             for attr in rows:
+                if cutoff is not None and attr.ts is not None and attr.ts > cutoff:
+                    continue  # horizon not yet elapsed; leave in-flight
                 price = self._md.latest_price(attr.symbol)
                 if price is None or attr.entry_price <= 0:
                     continue
@@ -80,7 +110,8 @@ class LearningService:
                 self._score_contributors(s, attr.contributors, fwd)
         if evaluated:
             self._run_promotion()
-            log.info("learning_evaluated", extra={"count": evaluated})
+            log.info("learning_evaluated",
+                     extra={"count": evaluated, "horizon_days": self._horizon_days})
         return {"evaluated": evaluated}
 
     def _score_contributors(self, session, contributors: dict, fwd: float) -> None:

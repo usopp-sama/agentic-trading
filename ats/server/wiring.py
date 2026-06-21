@@ -33,6 +33,7 @@ _SERVICES = [
     ("ats.services.telegram.service", "TelegramService"),
     ("ats.services.watchdog.service", "WatchdogService"),
     ("ats.services.learning.service", "LearningService"),
+    ("ats.services.metrics.service", "MetricsService"),
     ("ats.services.rules.service", "RulesService"),
     ("ats.services.dashboard.service", "DashboardService"),
 ]

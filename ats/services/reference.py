@@ -92,6 +92,25 @@ STRATEGIES: list[tuple[str, str, str, str]] = [
     ("pairs_zscore", "Pairs Z-Score (stat arb)", "stat_arb", "paper"),
     ("factor_composite", "Momentum + Low-Vol Factor Composite", "factor", "paper"),
     ("nav_premium", "ETF NAV Premium/Discount Arbitrage", "arbitrage", "paper"),
+    # Phase-2 strategy-library expansion. All start as "shadow": signals are
+    # logged and a virtual track record accrues, but no capital is allocated
+    # until the walk-forward backtest gate promotes them to "paper".
+    ("xs_momentum", "Cross-Sectional 12-1 Momentum", "momentum", "shadow"),
+    ("high_52w", "52-Week-High Momentum", "momentum", "shadow"),
+    ("dual_momentum", "Dual (Absolute + Relative) Momentum", "momentum", "shadow"),
+    ("macd_adx_trend", "MACD Trend + ADX Filter", "trend", "shadow"),
+    ("st_reversal", "Short-Term (1-Week) Reversal", "mean_reversion", "shadow"),
+    ("ou_keltner", "Keltner Z-Score Mean Reversion", "mean_reversion", "shadow"),
+    ("value_factor", "Value (FF) Factor Sleeve", "factor", "shadow"),
+    ("quality_qmj", "Quality (QMJ) Factor Sleeve", "factor", "shadow"),
+    ("size_factor", "Size (Banz) Factor Sleeve", "factor", "shadow"),
+    ("low_vol_bab", "Low-Volatility / Betting-Against-Beta", "factor", "shadow"),
+    ("coint_pairs", "Cointegration Pairs (Engle-Granger)", "stat_arb", "shadow"),
+    ("pead_drift", "Post-Earnings-Announcement Drift", "momentum", "shadow"),
+    ("news_sentiment", "News-Sentiment Momentum", "momentum", "shadow"),
+    ("turn_of_month", "Turn-of-Month Seasonality", "other", "shadow"),
+    ("vol_target", "Volatility-Managed Exposure Overlay", "other", "shadow"),
+    ("vol_premium", "Iron Condor — Variance Risk Premium", "vol", "paper"),
 ]
 
 
