@@ -28,6 +28,7 @@ htmlcov/
 # Runtime / generated data
 var/
 backups/
+logs/
 *.db
 *.sqlite
 
