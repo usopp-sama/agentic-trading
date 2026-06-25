@@ -271,3 +271,35 @@ td.r,th.r{text-align:right}
 }
 .banner{margin:14px 16px 0;padding:11px 15px;border-radius:12px;border:1px solid var(--border);background:var(--panel);font-size:13px}
 .banner.real{border-color:rgba(255,93,93,.5)}.banner.paper{border-color:rgba(255,184,77,.35)}
+
+/* Activity tab: per-order audit trail */
+details.act{border:1px solid var(--border);border-radius:12px;margin:8px 0;background:var(--panel)}
+details.act>summary{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;list-style:none;font-size:13px}
+details.act>summary::-webkit-details-marker{display:none}
+details.act[open]>summary{border-bottom:1px solid var(--border)}
+details.act .act-body{padding:12px 14px}
+details.act .rationale{font-size:13px;margin:0 0 12px;line-height:1.5}
+.why-grp{margin:10px 0;padding-top:8px;border-top:1px dashed var(--border)}
+.why-grp h4{margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.why-row{padding:6px 0;font-size:13px;line-height:1.5}
+.why-row code{background:var(--panel2);padding:1px 6px;border-radius:5px;font-size:11px;margin-right:4px}
+
+/* --- LLM + Logs tabs --- */
+.llm-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:12px}
+.llm-controls label{display:flex;align-items:center;gap:6px;color:var(--muted)}
+.llm-controls .chk{cursor:pointer}
+.llm-pre{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.5;
+  white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto;margin:4px 0 12px}
+.act-body h4{margin:6px 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.logwrap{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.6}
+.logline{display:flex;gap:10px;align-items:baseline;padding:4px 8px;border-bottom:1px solid var(--border);white-space:pre-wrap;word-break:break-word}
+.logline:hover{background:var(--panel2)}
+.logline .lts{color:var(--muted);flex:0 0 auto}
+.logline .lmsg{flex:1 1 auto}
+.logline .lextra{color:var(--muted)}
+.lvl{flex:0 0 auto;font-weight:700;border-radius:5px;padding:0 6px;font-size:11px}
+.lvl.INFO{color:var(--blue)}
+.lvl.WARNING{color:var(--amber)}
+.lvl.ERROR{color:var(--red)}
+.lvl.DEBUG,.lvl.RAW{color:var(--muted)}

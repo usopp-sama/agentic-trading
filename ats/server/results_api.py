@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
@@ -257,6 +257,89 @@ def equity_curve(request: Request,
                "equity": round(r.equity, 2), "net": round(r.net, 2),
                "drawdown": round(r.drawdown, 4)} for r in reversed(rows)]
     return {"account": account, "points": points, "count": len(points)}
+
+
+# --------------------------------------------------------------------------- #
+# Activity log: every order + the full "why" behind it
+# --------------------------------------------------------------------------- #
+@router.get("/activity")
+def activity(request: Request, limit: int = Query(50, ge=1, le=200)):
+    """Per-order audit trail: what we did and *why* — the CIO rationale, the
+    contributing SME opinions (stance/conviction/rationale/risks), the strategy
+    signals that fired (with their feature reasoning), and the risk rules that
+    were applied. This is the dashboard "Activity" tab's data source."""
+    out: list[dict] = []
+    with session_scope() as s:
+        rows = s.execute(
+            select(Fill, Order).join(Order, Fill.order_id == Order.id)
+            .order_by(Fill.id.desc()).limit(limit)
+        ).all()
+        dec_ids = {o.decision_id for _, o in rows if o.decision_id}
+        decs: dict[int, Decision] = {}
+        if dec_ids:
+            for d in s.execute(select(Decision).where(Decision.id.in_(dec_ids))).scalars().all():
+                decs[d.id] = d
+        for fill, order in rows:
+            d = decs.get(order.decision_id)
+            why: dict = {"sme": [], "signals": [], "rules": []}
+            if d is not None:
+                window_start = (d.ts or datetime.utcnow()) - timedelta(days=2)
+                ops = s.execute(
+                    select(SmeOpinion).where(
+                        SmeOpinion.symbol == order.symbol,
+                        SmeOpinion.ts <= d.ts, SmeOpinion.ts >= window_start,
+                    ).order_by(SmeOpinion.id.desc()).limit(14)
+                ).scalars().all()
+                seen_sme: set[str] = set()
+                for o in ops:
+                    if o.sme in seen_sme:
+                        continue
+                    seen_sme.add(o.sme)
+                    why["sme"].append({
+                        "sme": o.sme, "stance": o.stance,
+                        "conviction": round(o.conviction, 2),
+                        "horizon": o.horizon,
+                        "rationale": (o.rationale or "")[:280],
+                        "key_risks": (o.key_risks or [])[:3],
+                    })
+                sigs = s.execute(
+                    select(Signal).where(
+                        Signal.symbol == order.symbol,
+                        Signal.ts <= d.ts, Signal.ts >= window_start,
+                    ).order_by(Signal.id.desc()).limit(24)
+                ).scalars().all()
+                seen_strat: set[str] = set()
+                for sg in sigs:
+                    if sg.strategy in seen_strat:
+                        continue
+                    seen_strat.add(sg.strategy)
+                    why["signals"].append({
+                        "strategy": sg.strategy, "stance": sg.stance,
+                        "conviction": round(sg.conviction, 2),
+                        "features": sg.features or {},
+                    })
+                why["rules"] = d.rules_applied or []
+            out.append({
+                "ts": fill.ts.isoformat() if fill.ts else None,
+                "symbol": order.symbol, "side": order.side, "qty": fill.qty,
+                "price": round(fill.price, 2), "value": round(fill.qty * fill.price, 2),
+                "fees": round(fill.fees, 2), "status": order.status,
+                "decision_id": order.decision_id,
+                "action": (d.action if d else order.side),
+                "rationale": (d.rationale if d else "") or "",
+                "contributors": (d.contributors if d else {}) or {},
+                "why": why,
+            })
+    return {"activity": out, "count": len(out)}
+
+
+@router.get("/summary")
+def summary(request: Request):
+    """Deterministic 'what's going on right now' — same numbers as the digest
+    emails. Drives the Activity tab header."""
+    from ats.services.dashboard.summary import live_summary
+
+    return live_summary(_orch(request))
 
 
 # --------------------------------------------------------------------------- #

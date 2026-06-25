@@ -123,6 +123,57 @@ def _db_stage_counts(hours: int = 24) -> dict[str, int]:
     return counts
 
 
+def _read_app_log(limit: int = 300, level: str | None = None, q: str | None = None) -> list[dict]:
+    """Tail the rotating JSON log file, newest first.
+
+    Reads only the last ~512 KB so this is cheap even on a large file. Each line
+    is a JSON record (see ``ats.core.logging.JsonFormatter``); non-JSON lines are
+    surfaced as plain ``msg`` so nothing is silently dropped.
+    """
+    import json as _json
+
+    from ats.core.config import get_settings
+
+    limit = max(1, min(limit, 1000))
+    try:
+        s = get_settings()
+        path = Path(s.log_dir) / "ats.log"
+        if not path.exists():
+            return []
+        size = path.stat().st_size
+        chunk = min(size, 512 * 1024)
+        with path.open("rb") as fh:
+            fh.seek(size - chunk)
+            raw = fh.read().decode("utf-8", errors="replace")
+        # Drop a possibly-partial first line when we didn't start at byte 0.
+        lines = raw.splitlines()
+        if chunk < size and lines:
+            lines = lines[1:]
+    except Exception as exc:  # noqa: BLE001 - log viewer is best-effort
+        log.warning("app_log_read_failed", extra={"error": str(exc)})
+        return []
+
+    want = (level or "").upper()
+    needle = (q or "").lower()
+    out: list[dict] = []
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = _json.loads(line)
+        except Exception:  # noqa: BLE001
+            rec = {"ts": "", "level": "RAW", "logger": "", "msg": line}
+        if want and str(rec.get("level", "")).upper() != want:
+            continue
+        if needle and needle not in line.lower():
+            continue
+        out.append(rec)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def mount_dashboard(app: FastAPI) -> None:
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     if STATIC_DIR.exists():
@@ -138,13 +189,16 @@ def mount_dashboard(app: FastAPI) -> None:
     app.add_api_route("/opportunities", page("opportunities.html", "opportunities"), response_class=HTMLResponse)
     app.add_api_route("/charts", page("charts.html", "charts"), response_class=HTMLResponse)
     app.add_api_route("/portfolio", page("portfolio.html", "portfolio"), response_class=HTMLResponse)
+    app.add_api_route("/activity", page("activity.html", "activity"), response_class=HTMLResponse)
     app.add_api_route("/news", page("news.html", "news"), response_class=HTMLResponse)
     app.add_api_route("/experts", page("experts.html", "experts"), response_class=HTMLResponse)
+    app.add_api_route("/llm", page("llm.html", "llm"), response_class=HTMLResponse)
+    app.add_api_route("/logs", page("logs.html", "logs"), response_class=HTMLResponse)
     app.add_api_route("/system", page("system.html", "system"), response_class=HTMLResponse)
 
-    # Legacy paths fold into System (pipeline/agents/logs) or Today (overview).
+    # Legacy paths fold into System (pipeline/agents) or Today (overview).
     for old, target in {"/overview": "/", "/pipeline": "/system",
-                        "/agents": "/system", "/logs": "/system"}.items():
+                        "/agents": "/system"}.items():
         app.add_api_route(old, _redirect(target), response_class=RedirectResponse)
 
     @app.get("/api/dashboard")
@@ -220,6 +274,34 @@ def mount_dashboard(app: FastAPI) -> None:
                         "summary": _event_summary(e["topic"], e.get("payload", {})),
                         "stage": TOPIC_STAGE.get(e["topic"], "")})
         return {"events": out, "counters": hub.topic_counters()}
+
+    @app.get("/api/llm/calls")
+    def llm_calls(limit: int = 100, kind: str | None = None, ok: bool | None = None):
+        """History of real LLM queries (prompt + response) for the LLM tab."""
+        from ats.services.agents.llm_log import recent_calls
+
+        calls = recent_calls(limit=limit, kind=kind, ok=ok)
+        total = len(calls)
+        fails = sum(1 for c in calls if not c.get("ok"))
+        ptok = sum(int(c.get("prompt_tokens") or 0) for c in calls)
+        ctok = sum(int(c.get("completion_tokens") or 0) for c in calls)
+        return {
+            "calls": calls,
+            "stats": {"shown": total, "errors": fails,
+                      "prompt_tokens": ptok, "completion_tokens": ctok},
+        }
+
+    @app.get("/api/llm/usage")
+    def llm_usage(days: int | None = None):
+        """Token + estimated-cost rollup from recorded LLM calls."""
+        from ats.services.agents.llm_log import usage_summary
+
+        return usage_summary(days=days)
+
+    @app.get("/api/logs/app")
+    def app_logs(limit: int = 300, level: str | None = None, q: str | None = None):
+        """Tail of the structured application log file (JSON lines)."""
+        return {"lines": _read_app_log(limit=limit, level=level, q=q)}
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket):
