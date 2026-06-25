@@ -30,6 +30,7 @@ _SERVICES = [
     ("ats.services.risk.service", "RiskService"),
     ("ats.services.execution.service", "ExecutionService"),
     ("ats.services.vol_premium.service", "VolPremiumService"),
+    ("ats.services.email.service", "EmailService"),
     ("ats.services.telegram.service", "TelegramService"),
     ("ats.services.watchdog.service", "WatchdogService"),
     ("ats.services.learning.service", "LearningService"),
