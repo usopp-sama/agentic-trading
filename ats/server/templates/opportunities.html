@@ -79,7 +79,18 @@
   document.getElementById("detailClose").onclick = () => { document.getElementById("detail").classList.remove("open"); history.replaceState(null, "", location.pathname); };
   document.getElementById("refresh").onclick = load;
   document.getElementById("minScore").onchange = load;
-  A.on("snapshot", (s) => { if (s && s.opportunities && !document.getElementById("detail").classList.contains("open")) render(s.opportunities); });
+  // The websocket snapshot only carries the home page's top-8 list (and ignores
+  // the min-conviction filter), so rendering it here would shrink this full
+  // grid to ~8 cards seconds after load. Instead use the snapshot purely as a
+  // throttled trigger to re-fetch the full, filter-aware list from the API.
+  let lastSnap = 0;
+  A.on("snapshot", () => {
+    if (document.getElementById("detail").classList.contains("open")) return;
+    const now = Date.now();
+    if (now - lastSnap < 20000) return;  // at most one refetch per 20s
+    lastSnap = now;
+    load();
+  });
   load();
 })();
 </script>
