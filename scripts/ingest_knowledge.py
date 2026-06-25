@@ -87,17 +87,21 @@ def _read_text(path: Path) -> str:
 
 
 def _read_pdf(path: Path) -> str:
+    # Prefer pdfplumber: better layout/table fidelity for research papers and
+    # financial reports. Fall back to pypdf when pdfplumber isn't installed.
     try:
-        from pypdf import PdfReader  # type: ignore
-    except ImportError:
-        try:
-            import pdfplumber  # type: ignore
-        except ImportError as exc:  # pragma: no cover - env dependent
-            raise IngestError(
-                "PDF support needs 'pypdf' (pip install pypdf) or 'pdfplumber'"
-            ) from exc
+        import pdfplumber  # type: ignore
+
         with pdfplumber.open(str(path)) as pdf:
             return "\n\n".join((page.extract_text() or "") for page in pdf.pages)
+    except ImportError:
+        pass
+    try:
+        from pypdf import PdfReader  # type: ignore
+    except ImportError as exc:  # pragma: no cover - env dependent
+        raise IngestError(
+            "PDF support needs 'pdfplumber' or 'pypdf' (pip install pdfplumber)"
+        ) from exc
     reader = PdfReader(str(path))
     return "\n\n".join((page.extract_text() or "") for page in reader.pages)
 

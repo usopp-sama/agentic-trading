@@ -1,0 +1,38 @@
+# install.txt — one-shot setup for the agentic trading server + the SME
+# knowledge-ingestion pipeline.
+#
+# Install everything into your virtualenv with:
+#
+#     python -m pip install -r install.txt
+#
+# (Note: this venv's `pip` shim has a stale shebang — use `python -m pip`,
+#  e.g. `.venv/bin/python -m pip install -r install.txt`.)
+#
+# This pulls the full application (via requirements.txt) PLUS the document
+# parsers that scripts/ingest_knowledge.py needs to turn raw PDFs / HTML /
+# DOCX dropped into library/ into committed notes under knowledge/.
+
+# --- Core application: analytics + server + dev/test ---
+-r requirements.txt
+
+# --- Knowledge ingestion (scripts/ingest_knowledge.py) ---
+# Document parsers. The PDF reader prefers pdfplumber (best layout + table
+# fidelity for research papers and financial reports) and falls back to pypdf.
+pdfplumber>=0.11      # primary PDF text + table extraction
+pypdf>=4.0            # lightweight PDF fallback
+trafilatura>=1.6      # main-article text extraction from HTML (.htm/.html)
+python-docx>=1.1      # parse .docx reports
+
+# --- Optional, only if you have scanned/image PDFs (no text layer) ---
+# These need system binaries (not pip-only): install tesseract + ghostscript
+# via your OS package manager, then:
+#   python -m pip install ocrmypdf
+# Then OCR a file before ingesting:  ocrmypdf in.pdf out.pdf
+# Text-based PDFs (almost all papers/journals) need none of this.
+
+# --- Optional: FinBERT news sentiment (not needed for ingestion) ---
+# Switches news scoring from lexical VADER to the finance-tuned FinBERT.
+# Large download (torch); skip on lean machines. See requirements.txt notes.
+# transformers>=4.44,<5
+# torch>=2.2
+# truststore           # trust OS keychain CAs for the model download (macOS/corp)
