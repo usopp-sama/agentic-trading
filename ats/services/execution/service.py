@@ -53,6 +53,7 @@ class ExecutionService:
         self.kite = KiteAdapter()
         self._bus: EventBus | None = None
         self._md = None
+        self._orch = None
         self._peak_equity = 0.0
         self._pending: dict[int, Draft] = {}
 
@@ -62,6 +63,7 @@ class ExecutionService:
 
     async def start(self, ctx) -> None:
         self._bus = ctx.bus
+        self._orch = ctx.orchestrator
         self._md = ctx.orchestrator.get("market_data")
         self.broker.set_price_fn(self.price_of)
         # Recover peak equity so the drawdown-based daily-loss kill switch is
@@ -89,6 +91,17 @@ class ExecutionService:
             hour=settings.digest_hour, minute=settings.digest_minute, timezone=IST,
             id="daily_digest", max_instances=1, coalesce=True,
         )
+
+        # Intraday digests (IST) so an unattended run sends 2-3 status emails a
+        # day: a brief "what's going on right now" with equity, day P&L, open
+        # risk, biggest movers and the top opportunity. The close digest above
+        # is the authoritative end-of-day record.
+        for hour in settings.digest_intraday_hours:
+            ctx.scheduler.add_job(
+                self.push_intraday_digest, "cron",
+                hour=int(hour), minute=0, timezone=IST,
+                id=f"intraday_digest_{int(hour)}", max_instances=1, coalesce=True,
+            )
 
     def _feed_degraded(self) -> bool:
         from ats.core.config import get_settings
@@ -166,7 +179,23 @@ class ExecutionService:
             )
         return {"status": "PENDING_APPROVAL", "decision_id": draft.decision_id}
 
+    @staticmethod
+    def _already_filled(decision_id: int) -> bool:
+        """A decision must fill at most once. Guards against duplicate decision
+        events or a restart replaying the bus from creating phantom double
+        fills (the kind that polluted the early paper book)."""
+        with session_scope() as s:
+            n = s.execute(
+                select(func.count(Order.id)).where(
+                    Order.decision_id == decision_id, Order.status == "FILLED"
+                )
+            ).scalar_one()
+            return bool(n)
+
     async def _commit(self, draft: Draft) -> dict:
+        if draft.decision_id is not None and self._already_filled(draft.decision_id):
+            log.warning("duplicate_commit_skipped", extra={"decision_id": draft.decision_id})
+            return {"status": "DUPLICATE", "decision_id": draft.decision_id}
         # Real-broker routing is reachable only when the gate is open; in v1 it
         # is always paper. The Kite adapter itself also refuses without the gate.
         broker = self.kite if draft.use_real else self.broker
@@ -323,3 +352,39 @@ class ExecutionService:
         notify(msg)
         log.info("daily_digest", extra={"net": round(net, 2), "fills_24h": fills_24h})
         return {"digest": msg, "net": net, "fills_24h": fills_24h}
+
+    def _movers(self, snap: dict, threshold_pct: float = 3.0) -> list[str]:
+        """Open positions with a large mark-to-market swing — the "sudden
+        movements" worth flagging in an intraday note."""
+        out: list[str] = []
+        for p in snap.get("positions", []):
+            cost = abs(p.get("avg_price", 0.0) * p.get("qty", 0))
+            if cost <= 0:
+                continue
+            pct = 100.0 * p.get("unrealized_pnl", 0.0) / cost
+            if abs(pct) >= threshold_pct:
+                out.append(f"{p['symbol']} {pct:+.1f}% (Rs{p.get('unrealized_pnl', 0):+,.0f})")
+        return out
+
+    def push_intraday_digest(self) -> dict:
+        """A short "what's going on right now" note, sent 2-3x/day on a cron.
+
+        Trading-day only. Deterministic (no LLM) so it always sends, even if the
+        model provider is rate-limited. Movers above the threshold double as the
+        "sudden movement" alert the operator asked for.
+        """
+        from ats.services.market_data.calendar import is_trading_day
+
+        today = date.today()
+        if not is_trading_day(today):
+            return {"skipped": "not_trading_day"}
+        try:
+            from ats.services.dashboard.summary import digest_text
+
+            msg, payload = digest_text(self._orch, label="Intraday update")
+        except Exception as exc:  # noqa: BLE001 - digest must not raise in cron
+            log.warning("intraday_digest_failed", extra={"error": str(exc)})
+            return {"error": str(exc)}
+        notify(msg)
+        log.info("intraday_digest", extra={"equity": payload.get("equity")})
+        return {"digest": msg, **payload}
