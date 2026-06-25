@@ -109,6 +109,28 @@ class SmeOpinion(Base):
     evidence: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class LlmCall(Base):
+    """One real LLM provider call (prompt + response), for the dashboard's
+    LLM history. Persisted so the question log survives restarts; old rows are
+    trimmed by the recorder to keep the SQLite file bounded."""
+
+    __tablename__ = "llm_calls"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, index=True, default=_utcnow)
+    kind: Mapped[str] = mapped_column(String(16), default="opinion", index=True)  # opinion|chat|health
+    provider: Mapped[str] = mapped_column(String(24), default="")
+    model: Mapped[str] = mapped_column(String(64), default="", index=True)
+    persona: Mapped[str] = mapped_column(String(64), default="", index=True)
+    symbol: Mapped[str] = mapped_column(String(64), default="", index=True)
+    prompt: Mapped[str] = mapped_column(Text, default="")
+    response: Mapped[str] = mapped_column(Text, default="")
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    ok: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class Decision(Base):
     __tablename__ = "decisions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
