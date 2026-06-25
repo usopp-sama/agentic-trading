@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     # Daily digest push (IST 24h clock) shortly after the 15:30 close + settle.
     digest_hour: int = 15
     digest_minute: int = 45
+    # Extra intraday "what's going on now" digests (IST hours). With the close
+    # digest above this gives 2-3 status emails a day. Set to [] to disable.
+    # Override via env: ATS_DIGEST_INTRADAY_HOURS=[10,13]
+    digest_intraday_hours: list[int] = [10, 13]
 
     # --- Learning attribution + research metrics ---
     # Forward-return horizon used to score an SME's directional call. An
@@ -72,6 +76,23 @@ class Settings(BaseSettings):
     # --- Vector store ("memory" fallback; "chroma" if installed) ---
     vector_store: str = "memory"
 
+    # --- News sentiment model ("auto" | "finbert" | "vader") ---
+    # "auto" prefers the finance-tuned FinBERT transformer and falls back to the
+    # lexical VADER scorer when transformers/torch are not installed, so the
+    # offline laptop/Pi target still works with zero extra deps. "finbert" forces
+    # the transformer (and warns + falls back if it cannot load); "vader" pins
+    # the lexical scorer. Install the FinBERT extras to actually enable it
+    # (see requirements.txt): pip install "transformers>=4.44" torch
+    nlp_sentiment_model: str = "auto"
+    # HF model id, or a local directory holding config.json + weights + tokenizer.
+    nlp_finbert_model: str = "ProsusAI/finbert"
+    # Allow a runtime network download of the FinBERT weights. Default False: the
+    # model loads from local cache only and never blocks server startup on a
+    # download (which can hang behind a TLS-inspecting proxy). Provision weights
+    # once out-of-band, then flip this true only on a network where the fetch
+    # works — or point nlp_finbert_model at a local directory.
+    nlp_finbert_download: bool = False
+
     # --- Expert knowledge base (RAG grounding for SMEs) ---
     # Built-in domain primers ship per family; drop your own .md/.txt notes,
     # research, or filings here to extend any expert's reading.
@@ -100,6 +121,47 @@ class Settings(BaseSettings):
     # this, so keep it modest on memory-constrained hosts (e.g. a 16 GB box).
     # 0 = leave Ollama's own default untouched.
     llm_num_ctx: int = 8192
+
+    # --- LLM resilience (unattended month-long runs) ----------------------
+    # Retry transient provider errors (HTTP 429 rate-limit, 500/502/503/504)
+    # with capped exponential backoff (honoring Retry-After) before giving up.
+    llm_max_retries: int = 3
+    llm_backoff_base_s: float = 2.0
+    # After a real-provider failure, serve the deterministic mock for this long
+    # before re-probing the real provider — so a transient 429 self-heals
+    # without a restart instead of latching to the mock for the whole session.
+    llm_recover_cooldown_s: float = 180.0
+    # Optional client-side cap on real-provider calls per minute (0 = unlimited).
+    # On the paid tier leave this off; set e.g. 8 to stay under a free tier's
+    # 10 RPM. Applies process-wide across all SME + CIO calls.
+    llm_max_rpm: int = 0
+
+    # --- LLM cost governance (keep Gemini spend predictable) --------------
+    # The ONLY events that spend Gemini tokens are autonomous SME/macro
+    # evaluations (fresh news sentiment, volume spikes, the periodic macro
+    # sweep) plus the user-driven Experts console and Today brief. These knobs
+    # throttle the *autonomous* path only; anything you click stays available.
+    #
+    # Only let news/spikes spend tokens during the NSE session (+grace window).
+    # News is still fetched and scored locally 24/7 -- the SMEs read the
+    # accumulated sentiment when the market re-opens, so nothing is lost.
+    llm_eval_market_hours_only: bool = True
+    # Only run SMEs for symbols in the active watchlist/universe; ignore news
+    # that merely names tickers we do not trade.
+    llm_eval_universe_only: bool = True
+    # Minimum seconds between autonomous SME re-runs for the SAME symbol. A
+    # burst of headlines on one name then costs a single evaluation rather than
+    # one full roster pass per item.
+    llm_symbol_cooldown_s: float = 900.0
+    # Cap how many distinct symbols one news/spike event may fan out to (the
+    # most-mentioned win). Stops a 10-ticker macro headline from firing the
+    # whole roster across every name.
+    llm_max_symbols_per_event: int = 3
+    # Hard ceiling on characters sent to the model in a single autonomous
+    # opinion call. Above this the call is treated as "too big to auto-spend":
+    # the deterministic mock answers instead and the skip is logged for your
+    # review, rather than silently burning a large-token request. 0 = no cap.
+    llm_max_prompt_chars: int = 24000
 
     # --- Trading mode + the real-money gate -------------------------------
     # mode: OFF | PAPER | APPROVAL | AUTO. v1 default PAPER.
@@ -166,6 +228,21 @@ class Settings(BaseSettings):
     telegram_bot_token: str = Field(default="", repr=False)
     telegram_chat_id: str = Field(default="", repr=False)
 
+    # --- Email notifications (SMTP) ---
+    # The preferred alert/digest channel. When host + from + to are set the
+    # notify() funnel and EmailService deliver alerts, the daily digest, and
+    # approval requests over SMTP (STARTTLS by default). Password is a secret,
+    # so it comes from the environment and is redacted from logs.
+    email_smtp_host: str = ""
+    email_smtp_port: int = 587            # 587 = STARTTLS, 465 = implicit TLS
+    email_smtp_user: str = Field(default="", repr=False)
+    email_smtp_password: str = Field(default="", repr=False)
+    email_from: str = ""                  # e.g. "ATS Bot <you@gmail.com>"
+    email_to: str = ""                    # comma-separated recipients
+    email_use_tls: bool = True            # STARTTLS on 587; ignored on 465 (implicit)
+    email_subject_prefix: str = "[ATS]"
+    email_timeout_s: int = 15
+
     # --- Broker (Zerodha Kite) - deferred until real money is enabled ---
     kite_api_key: str = Field(default="", repr=False)
     kite_api_secret: str = Field(default="", repr=False)
@@ -175,6 +252,12 @@ class Settings(BaseSettings):
     market_scan_interval_s: int = 60
     news_poll_interval_s: int = 300
     agent_cycle_interval_s: int = 120
+    # Marketaux free tier allows only 100 requests/day. News polls every
+    # ``news_poll_interval_s`` (~288/day at 300s), which would blow the quota,
+    # so Marketaux is throttled to at most one call per this many seconds
+    # (1200s = ~72/day, comfortably under the cap). RSS feeds still run every
+    # poll. Raise the cap by lowering this only if you have a paid plan.
+    marketaux_min_interval_s: int = 1200
 
     # --- Watchdog (dead-man's switch; roadmap Part 10) ---
     watchdog_interval_s: int = 60
