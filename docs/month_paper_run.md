@@ -57,6 +57,23 @@ python scripts/train_smes.py --offline        # cold-start SME weights from hist
 Domain primers under `ats/services/agents/corpus/` are ingested automatically so
 SME grounding (RAG) is non-empty from the first request.
 
+### 1.4 (Optional) Enable FinBERT news sentiment
+
+News sentiment defaults to lexical VADER. To use the finance-tuned FinBERT
+transformer instead, install the extras and provision the weights **once**:
+
+```bash
+.venv/bin/python -m pip install "transformers>=4.44,<5" torch truststore
+.venv/bin/python scripts/fetch_finbert.py        # ~438 MB, one-time
+# then set in .env:  ATS_NLP_SENTIMENT_MODEL=auto
+```
+
+The server never downloads the model at startup (it loads from cache only and
+falls back to VADER instantly if absent), so this step is safe to skip or defer.
+Behind a TLS-inspecting proxy (e.g. Cisco AMP) the download may stall — run it on
+a permissive network; cached weights then work everywhere. Full details and
+troubleshooting in [nlp_sentiment.md](nlp_sentiment.md).
+
 ### 1.3 Pre-flight checks
 
 ```bash
@@ -135,6 +152,22 @@ an alert.
 A digest is pushed via the notify channel shortly after the 15:30 IST close
 (`ATS_DIGEST_HOUR`/`MINUTE`, default 15:45) summarizing P&L and activity. Skim it
 for surprises (an outsized loss, an unexpected kill-switch event).
+
+**Email alerts (recommended channel).** The notify funnel emails alerts, the
+daily digest, and approval requests over SMTP when configured; the `EmailService`
+additionally forwards bus alerts (strategy decay, feed degrade/recover). Set:
+
+```bash
+ATS_EMAIL_SMTP_HOST=smtp.gmail.com   # 587 STARTTLS (default) or 465 implicit TLS
+ATS_EMAIL_SMTP_USER=you@gmail.com
+ATS_EMAIL_SMTP_PASSWORD=your-app-password   # create an App Password (2FA on); never your login
+ATS_EMAIL_FROM="ATS Bot <you@gmail.com>"
+ATS_EMAIL_TO=you@gmail.com            # comma-separated for multiple recipients
+```
+
+All three of host/from/to must be set to enable; otherwise pushes log-only.
+Transport is TLS-verified, the password is never logged, and a send failure
+never interrupts trading (it logs and the digest/alert still hits the dashboard).
 
 ### 3.3 Logs
 

@@ -52,7 +52,8 @@ with no API keys, no database server, and no internet strictly required.
   sectors + key index/commodity ETFs like `NIFTYBEES`, `GOLDBEES`, `SILVERBEES`),
   persists bars, and flags volume spikes.
 - **Reads the news.** Pulls RSS/free-tier feeds, de-duplicates, maps headlines to
-  tickers, and scores sentiment (VADER by default, FinBERT-ready).
+  tickers, and scores sentiment (finance-tuned FinBERT when provisioned, VADER
+  fallback — see [docs/nlp_sentiment.md](docs/nlp_sentiment.md)).
 - **Thinks like a desk.** A roster of 26 expert personas (technicals, value, macro,
   geopolitics, sectors, ETFs, risk, …) each produce a grounded opinion; a **CIO**
   aggregates them with track-record-weighted voting into a proposed position.
@@ -225,6 +226,8 @@ All settings are environment variables prefixed `ATS_`, loaded from a repo-root 
 | `ATS_EVENT_BUS` | `memory` | `memory` or `redis` |
 | `ATS_REDIS_URL` | `redis://localhost:6379/0` | Redis Streams bus/cache |
 | `ATS_VECTOR_STORE` | `memory` | `memory` or `chroma` (if installed) |
+| `ATS_NLP_SENTIMENT_MODEL` | `auto` | `auto` (FinBERT, VADER fallback) \| `finbert` \| `vader` ([docs](docs/nlp_sentiment.md)) |
+| `ATS_NLP_FINBERT_DOWNLOAD` | `false` | Allow runtime FinBERT weight download (default: cache-only, no startup hang) |
 | `ATS_DATA_SOURCE` | `yfinance` | `yfinance` \| `synthetic` \| `kite` |
 | `ATS_TRADING_MODE` | `PAPER` | `OFF` \| `PAPER` \| `APPROVAL` \| `AUTO` |
 | `ATS_REAL_MONEY_ENABLED` | `false` | **Master real-money gate** (config-only) |
@@ -240,6 +243,11 @@ All settings are environment variables prefixed `ATS_`, loaded from a repo-root 
 | `ATS_MARKET_SCAN_INTERVAL_S` | `60` | Market poll cadence |
 | `ATS_AGENT_CYCLE_INTERVAL_S` | `120` | Agent cycle cadence |
 | `ATS_NEWS_POLL_INTERVAL_S` | `300` | News poll cadence |
+| `ATS_MARKETAUX_API_KEY` | — | Marketaux news (free tier: 100 req/day) |
+| `ATS_MARKETAUX_MIN_INTERVAL_S` | `1200` | Min gap between Marketaux calls (~72/day, under the free cap) |
+| `ATS_EMAIL_SMTP_HOST` / `_PORT` | — / `587` | SMTP host + port (587 STARTTLS, 465 TLS) — alerts & digest |
+| `ATS_EMAIL_SMTP_USER` / `_PASSWORD` | — | SMTP login (use an app password, not your account password) |
+| `ATS_EMAIL_FROM` / `_TO` | — | Sender + comma-separated recipients (set all three of host/from/to to enable) |
 | `ATS_KITE_API_KEY` / `_SECRET` / `_ACCESS_TOKEN` | — | Zerodha (deferred) |
 
 Free-tier API keys (`ATS_MARKETAUX_API_KEY`, `ATS_FRED_API_KEY`, Telegram, …) are all
@@ -483,6 +491,7 @@ each tagged with a style the regime layer understands:
 | Component | What it does |
 |---|---|
 | `ats.services.watchdog` | Dead-man's switch: tracks bar heartbeats (market-hours aware), alerts on staleness, engages the kill switch after sustained silence. Never auto-releases — a human re-arms. |
+| `ats.services.email` | Preferred alert channel: the `notify()` funnel emails alerts, the daily digest, and approval requests over TLS (STARTTLS/SSL); `EmailService` forwards bus alerts (strategy decay, feed degrade/recover). Dormant without SMTP config. |
 | `ats.services.telegram` | One-tap approvals (autonomy L1): staged orders arrive as messages with Approve/Reject buttons wired to the same audited approval path as the dashboard; alerts forwarded. Dormant without a token. |
 | `ats.services.execution.options_book` | Defined-risk options paper execution: credit spreads/iron condors with worst-case margin reserved at open — losses are bounded by construction. |
 
@@ -548,7 +557,8 @@ intelligence layer — persona-driven experts, a CIO aggregator, a RAG
 knowledge base with hybrid reliability-weighted retrieval, self-evolving
 context-only directives, and an interactive expert console with living
 theses and multi-expert debate — is documented in roadmap Part 14 and
-`docs/smx.md`. Still ahead — FinBERT sentiment, folding the experts
-console into the multi-page dashboard, ML-based signals with
-walk-forward validation, and the Kite adapter when the paper track
-record earns real money.
+`docs/smx.md`. News sentiment now runs finance-tuned FinBERT (with a
+VADER fallback) — see [docs/nlp_sentiment.md](docs/nlp_sentiment.md).
+Still ahead — folding the experts console into the multi-page
+dashboard, ML-based signals with walk-forward validation, and the Kite
+adapter when the paper track record earns real money.

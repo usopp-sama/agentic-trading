@@ -358,8 +358,12 @@ as `Topic.NEWS`.
 
 ### nlp ([ats/services/nlp/](../ats/services/nlp/))
 
-- **Sentiment** ([sentiment.py](../ats/services/nlp/sentiment.py)): VADER by
-  default, optional FinBERT when transformers are available. Scores in `[-1, 1]`.
+- **Sentiment** ([sentiment.py](../ats/services/nlp/sentiment.py)): backend is
+  config-driven via `ATS_NLP_SENTIMENT_MODEL` (`auto`/`finbert`/`vader`).
+  `auto` (default) prefers the finance-tuned FinBERT transformer and falls back
+  to the lexical VADER scorer when `transformers`/`torch` are not installed, so
+  the offline target still runs with zero extra deps. Scores in `[-1, 1]`; the
+  active backend is recorded on each `SentimentScore` row.
 - **Ticker mapping** ([ner.py](../ats/services/nlp/ner.py)): a `TickerMapper`
   built from the `Instrument` table (names, symbol roots) with whole-word regex
   matching, plus sector-keyword matching.
@@ -884,6 +888,7 @@ See [month_paper_run.md](month_paper_run.md) for the current operating plan.
 | [README.md](../README.md) | Product overview, quick start, config table, safety model, run commands. |
 | [smx.md](smx.md) | The agentic SME intelligence design (personas, retrieval, directives, debate). |
 | [sme_knowledge_base.md](sme_knowledge_base.md) | RAG curriculum: how to author/ingest knowledge, sourcing list per family. |
+| [nlp_sentiment.md](nlp_sentiment.md) | News sentiment backends (VADER/FinBERT), config, FinBERT provisioning + TLS-proxy notes. |
 | [dashboard_redesign.md](dashboard_redesign.md) | Rationale for the results-first multi-page dashboard. |
 | [month_paper_run.md](month_paper_run.md) | The month-long paper-run operating plan. |
 | [deployment_lan.md](deployment_lan.md) | LAN/Docker deployment and the token gate. |
