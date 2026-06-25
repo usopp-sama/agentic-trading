@@ -11,6 +11,7 @@ the model as delimited DATA (handled in the LLM client), never as instructions.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import time
@@ -44,7 +45,10 @@ class SmeRuntime:
         if cached and cached[0] == sig_hash and (now - cached[2]) < _CACHE_TTL_S:
             return cached[1]
 
-        raw = self.llm.generate_opinion(persona, context)
+        # The LLM client does blocking network I/O (and retry/backoff sleeps);
+        # run it off the event loop so the web server / dashboard stay responsive
+        # during SME bursts and provider throttling.
+        raw = await asyncio.to_thread(self.llm.generate_opinion, persona, context)
         opinion = self._validate(persona, symbol, raw, context)
         self._persist(opinion)
         self._cache[cache_key] = (sig_hash, opinion, now)

@@ -13,6 +13,8 @@ until promoted. RISK-family personas never vote on direction.
 
 from __future__ import annotations
 
+import asyncio
+
 from sqlalchemy import select
 
 from ats.core.db import session_scope
@@ -23,7 +25,9 @@ from ats.core.schemas import Opinion, ProposedPosition
 from ats.services.agents.cio import CIO
 from ats.services.agents.console import ExpertConsole
 from ats.services.agents.directives import get_directive_store
+from ats.services.agents.gating import SymbolCooldown, eval_window_open, rank_symbols
 from ats.services.agents.knowledge_base import get_knowledge_base
+from ats.services.agents.news_routing import classify_themes, route_macro_personas
 from ats.services.agents.llm_client import select_llm_clients
 from ats.services.agents.registry import families, load_personas
 from ats.services.agents.runtime import SmeRuntime
@@ -48,9 +52,13 @@ class AgentService:
         self._macro_tilt: float = 0.0
         self._console: ExpertConsole | None = None
         self._llm_status: dict = {"provider": "mock", "real": False}
+        self._market_data = None  # set in start(); used for the universe filter
         # Debounce macro re-evaluation driven by incoming news.
         self._last_macro_news: float = 0.0
         self._macro_news_min_gap_s: float = 90.0
+        # Per-symbol cooldown so a burst of news on one name costs a single
+        # autonomous SME evaluation rather than one full roster pass per item.
+        self._cooldown = SymbolCooldown()
 
     async def start(self, ctx) -> None:
         self._bus = ctx.bus
@@ -61,9 +69,11 @@ class AgentService:
             knowledge=ctx.orchestrator.get("knowledge"),
             fundamentals=ctx.orchestrator.get("fundamentals"),
         )
-        # Build the SME + CIO LLM clients and verify a real provider actually
-        # answers; if not, downgrade to the deterministic mock for this session
-        # (prevents a 60s-per-call timeout when Ollama/API is misconfigured).
+        self._market_data = providers.market_data
+        # Build the SME + CIO LLM clients and probe whether a real provider
+        # answers. A failed probe no longer pins the session to the mock: the
+        # clients are resilient and auto-recover once the provider is reachable
+        # (e.g. after a transient 429). llm_status() reports the live state.
         sme_llm, cio_llm, self._llm_status = select_llm_clients()
         self._runtime = SmeRuntime(providers, llm_client=sme_llm)
         self._personas = self._load_personas()
@@ -95,31 +105,84 @@ class AgentService:
         return load_personas()
 
     # --- triggers ----------------------------------------------------------
-    async def _on_spike(self, evt) -> None:
-        symbol = evt.payload.get("symbol")
-        if symbol and not symbol.startswith("^"):
+    # Cost governance lives here: the autonomous triggers below are the only
+    # paths that can spend Gemini tokens unattended, so they enforce the clock
+    # window, universe filter, per-symbol cooldown, and fan-out cap. The manual
+    # ``run_symbol``/console/brief paths stay unthrottled on purpose.
+
+    def _universe(self) -> list[str] | None:
+        if self._market_data is None:
+            return None
+        try:
+            return self._market_data.watchlist()
+        except Exception:  # noqa: BLE001 - never let the filter break a trigger
+            return None
+
+    async def _evaluate(self, symbols: list[str]) -> None:
+        """Run the symbol-scope SMEs for each gated symbol, marking cooldowns."""
+        from ats.core.config import get_settings
+
+        cooldown = get_settings().llm_symbol_cooldown_s
+        for symbol in symbols:
+            if not self._cooldown.ready(symbol, cooldown):
+                log.debug("sme_skip_cooldown", extra={"symbol": symbol})
+                continue
+            self._cooldown.mark(symbol)
             await self.run_symbol(symbol)
 
-    async def _on_sentiment(self, evt) -> None:
-        # Portfolio/watchlist impact: the named tickers get a fresh symbol-scope
-        # SME read.
-        for symbol in evt.payload.get("tickers", []):
-            if not symbol.startswith("^"):
-                await self.run_symbol(symbol)
-        # World-market impact: any news (including ticker-less macro/world news)
-        # nudges the macro (Family B) experts to re-read the latest headlines.
-        # Debounced so a burst of items triggers a single re-evaluation.
-        await self._maybe_refresh_macro_from_news()
+    async def _on_spike(self, evt) -> None:
+        if not eval_window_open():
+            return
+        from ats.core.config import get_settings
 
-    async def _maybe_refresh_macro_from_news(self) -> None:
+        s = get_settings()
+        symbol = evt.payload.get("symbol")
+        gated = rank_symbols(
+            [symbol] if symbol else [],
+            universe=self._universe(),
+            universe_only=s.llm_eval_universe_only,
+            cap=max(1, s.llm_max_symbols_per_event),
+        )
+        await self._evaluate(gated)
+
+    async def _on_sentiment(self, evt) -> None:
+        # No autonomous spend outside the session: the news has already been
+        # fetched and scored locally and persisted, so the SMEs pick it up when
+        # the market re-opens. Nothing is lost, we just defer the reasoning.
+        if not eval_window_open():
+            return
+        from ats.core.config import get_settings
+
+        s = get_settings()
+        # Portfolio/watchlist impact: a capped, de-duped, universe-filtered set
+        # of the named tickers get a fresh symbol-scope SME read.
+        gated = rank_symbols(
+            evt.payload.get("tickers", []),
+            universe=self._universe(),
+            universe_only=s.llm_eval_universe_only,
+            cap=max(1, s.llm_max_symbols_per_event),
+        )
+        await self._evaluate(gated)
+        # World-market impact: theme-route the headline so only the relevant
+        # macro (Family B) experts re-read, instead of the whole roster.
+        # Debounced so a burst of items triggers a single re-evaluation.
+        themes = classify_themes(evt.payload.get("title", ""))
+        await self._maybe_refresh_macro_from_news(themes)
+
+    async def _maybe_refresh_macro_from_news(self, themes: set[str] | None = None) -> None:
         import time
 
+        if not eval_window_open():
+            return
         now = time.monotonic()
         if now - self._last_macro_news < self._macro_news_min_gap_s:
             return
         self._last_macro_news = now
+        # Route to the experts whose themes the headline touches (+ the always-on
+        # core). An unclassifiable headline runs only the core, not all 16.
+        routed = route_macro_personas(themes, self._macro_personas)
         try:
-            await self.refresh_macro()
+            await self.refresh_macro(routed)
         except Exception as exc:  # noqa: BLE001 - macro refresh is best-effort
             log.warning("macro_refresh_on_news_failed", extra={"error": str(exc)})
 
@@ -135,11 +198,14 @@ class AgentService:
         await self.refresh_macro()
 
     # --- macro (Family B) --------------------------------------------------
-    async def refresh_macro(self) -> float:
+    async def refresh_macro(self, personas: list[dict] | None = None) -> float:
+        """Re-read the macro view. ``personas`` lets a news trigger run only the
+        theme-relevant subset; the periodic sweep passes ``None`` for a full read."""
         if self._runtime is None:
             return 0.0
+        pool = personas if personas is not None else self._macro_personas
         num = den = 0.0
-        for persona in self._macro_personas:
+        for persona in pool:
             op = await self._runtime.run(persona, _MARKET, self._bus)
             w = self._effective_weight(persona)
             num += w * (op.stance.direction / 2.0) * op.conviction
@@ -186,7 +252,7 @@ class AgentService:
         opinions: dict[str, object] = {}
         for p in personas:
             try:
-                opinions[p["id"]] = self._runtime.opine(p, symbol)
+                opinions[p["id"]] = await asyncio.to_thread(self._runtime.opine, p, symbol)
             except Exception as exc:  # noqa: BLE001
                 log.warning("debate_opine_failed", extra={"sme": p["id"], "error": str(exc)})
 
@@ -199,7 +265,9 @@ class AgentService:
             for p in personas:
                 others = [op for sid, op in peers.items() if sid != p["id"]]
                 try:
-                    updated[p["id"]] = self._runtime.opine(p, symbol, {"peer_opinions": others})
+                    updated[p["id"]] = await asyncio.to_thread(
+                        self._runtime.opine, p, symbol, {"peer_opinions": others}
+                    )
                 except Exception:  # noqa: BLE001
                     updated[p["id"]] = opinions.get(p["id"])
             opinions = {k: v for k, v in updated.items() if v is not None}
@@ -276,7 +344,18 @@ class AgentService:
         return self._console
 
     def llm_status(self) -> dict:
-        """Startup self-check result: is real reasoning actually live?"""
+        """Live LLM health: reflects auto-recovery, not just the startup probe.
+
+        Reads the resilient client's current state so ``/api/health`` shows the
+        provider coming back online after a transient outage without a restart.
+        Falls back to the startup snapshot if the client predates this contract.
+        """
+        client = getattr(self._runtime, "llm", None)
+        if client is not None and hasattr(client, "status"):
+            try:
+                return client.status()
+            except Exception:  # noqa: BLE001 - status must never break health
+                pass
         return dict(self._llm_status)
 
     @property

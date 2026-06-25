@@ -15,7 +15,7 @@ from ats.core.db import session_scope
 from ats.core.events import EventBus, Topic
 from ats.core.logging import get_logger
 from ats.core.models import NewsItem, SentimentScore
-from ats.services.nlp.sentiment import SentimentModel
+from ats.services.nlp.sentiment import build_sentiment_model
 from ats.services.nlp.vectorstore import get_vector_store
 
 log = get_logger("ats.nlp")
@@ -28,7 +28,9 @@ class NlpService:
     name = "nlp"
 
     def __init__(self) -> None:
-        self.model = SentimentModel(prefer_finbert=False)
+        # FinBERT-preferred (config-driven), VADER fallback when the transformer
+        # extras are not installed.
+        self.model = build_sentiment_model()
         self.store = get_vector_store()
         self._bus: EventBus | None = None
 
@@ -64,7 +66,7 @@ class NlpService:
                     SentimentScore(
                         symbol=symbol,
                         news_id=p.get("news_id"),
-                        model="vader",
+                        model=self.model.name,
                         label=label,
                         score=score,
                     )
@@ -72,7 +74,15 @@ class NlpService:
         if self._bus is not None:
             await self._bus.publish(
                 Topic.SENTIMENT,
-                {"tickers": tickers, "label": label, "score": score, "news_id": p.get("news_id")},
+                {
+                    "tickers": tickers,
+                    "label": label,
+                    "score": score,
+                    "news_id": p.get("news_id"),
+                    # Title carried so the agent layer can theme-route the macro
+                    # re-read to only the relevant experts (local, no LLM).
+                    "title": p.get("title", ""),
+                },
             )
 
     # --- accessors used by agents -----------------------------------------
