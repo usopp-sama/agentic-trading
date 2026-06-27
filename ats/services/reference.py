@@ -42,7 +42,7 @@ UNIVERSE: list[tuple[str, str, str, str]] = [
     ("TATACONSUM.NS", "Tata Consumer", "FMCG", "EQ"),
     # Auto
     ("MARUTI.NS", "Maruti Suzuki", "Auto", "EQ"),
-    ("TATAMOTORS.NS", "Tata Motors", "Auto", "EQ"),
+    ("TMPV.NS", "Tata Motors PV", "Auto", "EQ"),
     ("M&M.NS", "Mahindra & Mahindra", "Auto", "EQ"),
     ("BAJAJ-AUTO.NS", "Bajaj Auto", "Auto", "EQ"),
     ("EICHERMOT.NS", "Eicher Motors", "Auto", "EQ"),
