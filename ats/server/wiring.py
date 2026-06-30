@@ -29,6 +29,7 @@ _SERVICES = [
     ("ats.services.agents.service", "AgentService"),
     ("ats.services.risk.service", "RiskService"),
     ("ats.services.execution.service", "ExecutionService"),
+    ("ats.services.execution.strategy_trader", "StrategyTraderService"),
     ("ats.services.vol_premium.service", "VolPremiumService"),
     ("ats.services.email.service", "EmailService"),
     ("ats.services.telegram.service", "TelegramService"),

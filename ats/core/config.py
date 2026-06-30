@@ -220,6 +220,22 @@ class Settings(BaseSettings):
     # correlation-aware risk parity with a bounded performance tilt.
     sleeve_allocation_method: str = "auto"
 
+    # --- Strategy auto-trade: let the quant strategies drive paper orders ---
+    # When enabled, StrategyTraderService turns a consensus of the `paper`-status
+    # strategy signals into proposals that flow through the SAME Risk -> Execution
+    # path the LLM pipeline uses (sizing, guardrails, long-only clamp all apply).
+    # No LLM/Gemini spend on this path. Signals only fire during the polling
+    # window, so trades are naturally market-hours bound.
+    strategy_autotrade_enabled: bool = True
+    # Net strategy score = (Σ bullish conviction − Σ bearish conviction) / voters.
+    # Open a new position when net ≥ buy_threshold AND ≥ min_agree strategies agree.
+    strategy_trade_buy_threshold: float = 0.12
+    # Flatten a held name when its net strategy score falls to/below this.
+    strategy_trade_exit_threshold: float = 0.0
+    strategy_trade_min_agree: int = 1
+    # Per-symbol cooldown between strategy-driven orders (anti-churn), seconds.
+    strategy_trade_cooldown_s: int = 300
+
     # --- External data API keys (free-tier v1 stack; optional) ---
     marketaux_api_key: str = Field(default="", repr=False)
     alphavantage_api_key: str = Field(default="", repr=False)
