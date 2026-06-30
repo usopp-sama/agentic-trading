@@ -266,6 +266,60 @@ class StrategyService:
             s["alloc_weight"] = self._alloc_weights.get(s["strategy"])
         return stats
 
+    def live_state(self) -> dict:
+        """Roster + live calls + sleeve P&L for the /strategies dashboard page.
+
+        Combines the static registry (id/name/type), the DB-backed run status
+        (paper vs shadow vs paused), each strategy's current actionable signals,
+        and its virtual sleeve stats. ``paper`` strategies are the ones that can
+        actually trade (StrategyTraderService acts on their consensus).
+        """
+        from ats.services.reference import STRATEGIES as _ROSTER
+
+        by_strategy: dict[str, list[dict]] = {}
+        for sym, sigs in self._latest.items():
+            for sid, sig in sigs.items():
+                if sig.stance == Stance.NEUTRAL:
+                    continue
+                by_strategy.setdefault(sid, []).append(
+                    {"symbol": sym, "stance": sig.stance.value, "conviction": round(sig.conviction, 3)}
+                )
+        for sid in by_strategy:
+            by_strategy[sid].sort(key=lambda r: -r["conviction"])
+
+        sleeves = {s.get("strategy"): s for s in self.sleeve_stats()}
+        roster: list[dict] = []
+        for sid, name, stype, default_status in _ROSTER:
+            status = self._status.get(sid, default_status)
+            sl = sleeves.get(sid, {})
+            signals = by_strategy.get(sid, [])
+            roster.append(
+                {
+                    "id": sid,
+                    "name": name,
+                    "type": stype,
+                    "status": status,
+                    "tradeable": status == "paper",
+                    "signals": signals,
+                    "n_signals": len(signals),
+                    "sleeve_equity": sl.get("equity"),
+                    "sharpe": sl.get("sharpe"),
+                    "alloc_weight": sl.get("alloc_weight"),
+                }
+            )
+        roster.sort(key=lambda r: (r["status"] != "paper", -r["n_signals"], r["id"]))
+        n_paper = sum(1 for r in roster if r["status"] == "paper")
+        n_live_calls = sum(r["n_signals"] for r in roster)
+        return {
+            "strategies": roster,
+            "summary": {
+                "total": len(roster),
+                "paper": n_paper,
+                "shadow": sum(1 for r in roster if r["status"] == "shadow"),
+                "live_calls": n_live_calls,
+            },
+        }
+
     @staticmethod
     def _load_status() -> dict[str, str]:
         with session_scope() as s:

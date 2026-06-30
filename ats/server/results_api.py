@@ -81,6 +81,57 @@ def opportunity(symbol: str, request: Request):
 
 
 # --------------------------------------------------------------------------- #
+# Strategies — the quant roster, their live calls, and what they actually traded
+# --------------------------------------------------------------------------- #
+@router.get("/strategies")
+def strategies(request: Request):
+    from ats.core.config import get_settings
+
+    orch = _orch(request)
+    svc = orch.get("strategies") if orch else None
+    state = (
+        svc.live_state()
+        if svc is not None and hasattr(svc, "live_state")
+        else {"strategies": [], "summary": {}}
+    )
+
+    # Recent orders the strategy consensus actually drove (tagged by the trader).
+    trades: list[dict] = []
+    with session_scope() as s:
+        rows = (
+            s.execute(select(Decision).order_by(Decision.id.desc()).limit(200))
+            .scalars()
+            .all()
+        )
+        for d in rows:
+            contrib = d.contributors or {}
+            if contrib.get("source") != "strategy_consensus":
+                continue
+            trades.append(
+                {
+                    "ts": d.ts.isoformat() if d.ts else None,
+                    "symbol": d.symbol,
+                    "action": d.action,
+                    "qty": d.target_qty,
+                    "status": d.status,
+                    "rationale": d.rationale,
+                    "net_score": contrib.get("net_score"),
+                    "voters": contrib.get("voters"),
+                    "strategies": contrib.get("strategies", []),
+                    "rules_applied": d.rules_applied or [],
+                }
+            )
+            if len(trades) >= 30:
+                break
+
+    return {
+        **state,
+        "trades": trades,
+        "autotrade_enabled": get_settings().strategy_autotrade_enabled,
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Candles + annotations (Lightweight-Charts shaped)
 # --------------------------------------------------------------------------- #
 @router.get("/ohlcv")

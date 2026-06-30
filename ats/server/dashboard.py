@@ -187,6 +187,7 @@ def mount_dashboard(app: FastAPI) -> None:
     # Results-first information architecture.
     app.add_api_route("/", page("today.html", "today"), response_class=HTMLResponse)
     app.add_api_route("/opportunities", page("opportunities.html", "opportunities"), response_class=HTMLResponse)
+    app.add_api_route("/strategies", page("strategies.html", "strategies"), response_class=HTMLResponse)
     app.add_api_route("/charts", page("charts.html", "charts"), response_class=HTMLResponse)
     app.add_api_route("/portfolio", page("portfolio.html", "portfolio"), response_class=HTMLResponse)
     app.add_api_route("/activity", page("activity.html", "activity"), response_class=HTMLResponse)
