@@ -35,6 +35,10 @@ logs/
 # Raw knowledge sources (ingested into var/knowledge; not committed)
 /library/*
 !/library/README.md
+# Compressed source/library archives (large binaries; ingest locally, don't commit)
+*.rar
+*.zip
+*.7z
 
 # Environment & secrets
 .env
