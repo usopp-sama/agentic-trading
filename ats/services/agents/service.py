@@ -53,6 +53,7 @@ class AgentService:
         self._console: ExpertConsole | None = None
         self._llm_status: dict = {"provider": "mock", "real": False}
         self._market_data = None  # set in start(); used for the universe filter
+        self._execution = None    # set in start(); used to scope news to holdings
         # Debounce macro re-evaluation driven by incoming news.
         self._last_macro_news: float = 0.0
         self._macro_news_min_gap_s: float = 90.0
@@ -70,6 +71,7 @@ class AgentService:
             fundamentals=ctx.orchestrator.get("fundamentals"),
         )
         self._market_data = providers.market_data
+        self._execution = ctx.orchestrator.get("execution")
         # Build the SME + CIO LLM clients and probe whether a real provider
         # answers. A failed probe no longer pins the session to the mock: the
         # clients are resilient and auto-recover once the provider is reachable
@@ -118,13 +120,36 @@ class AgentService:
         except Exception:  # noqa: BLE001 - never let the filter break a trigger
             return None
 
-    async def _evaluate(self, symbols: list[str]) -> None:
-        """Run the symbol-scope SMEs for each gated symbol, marking cooldowns."""
+    def _held_symbols(self) -> set[str]:
+        """Symbols we currently hold (qty > 0) in the paper book, upper-cased."""
+        if self._execution is None:
+            return set()
+        try:
+            snap = self._execution.get_snapshot()
+        except Exception:  # noqa: BLE001 - never let accounting break a trigger
+            return set()
+        return {
+            str(p.get("symbol", "")).upper()
+            for p in snap.get("positions", [])
+            if p.get("qty", 0)
+        }
+
+    async def _evaluate(self, symbols: list[str], force: set[str] | None = None) -> None:
+        """Run the symbol-scope SMEs for each gated symbol, marking cooldowns.
+
+        ``force`` is the set of held names mentioned in the trigger: we always
+        re-read news on what we own (bypassing the per-symbol cooldown) so the
+        book reacts to fresh information, and they run first.
+        """
         from ats.core.config import get_settings
 
         cooldown = get_settings().llm_symbol_cooldown_s
-        for symbol in symbols:
-            if not self._cooldown.ready(symbol, cooldown):
+        force = {s.upper() for s in (force or set())}
+        # Held names first (forced), then the gated set; de-duped, order-preserving.
+        ordered = list(dict.fromkeys(list(force) + list(symbols)))
+        for symbol in ordered:
+            forced = symbol.upper() in force
+            if not forced and not self._cooldown.ready(symbol, cooldown):
                 log.debug("sme_skip_cooldown", extra={"symbol": symbol})
                 continue
             self._cooldown.mark(symbol)
@@ -154,15 +179,22 @@ class AgentService:
         from ats.core.config import get_settings
 
         s = get_settings()
+        tickers = evt.payload.get("tickers", [])
         # Portfolio/watchlist impact: a capped, de-duped, universe-filtered set
         # of the named tickers get a fresh symbol-scope SME read.
         gated = rank_symbols(
-            evt.payload.get("tickers", []),
+            tickers,
             universe=self._universe(),
             universe_only=s.llm_eval_universe_only,
             cap=max(1, s.llm_max_symbols_per_event),
         )
-        await self._evaluate(gated)
+        # Holdings-scoped monitoring: any name we currently OWN that this news
+        # mentions is always evaluated -- even if the universe filter or fan-out
+        # cap would have dropped it -- and bypasses the cooldown. We want to act
+        # on fresh information about our own book promptly and deliberately.
+        held = self._held_symbols()
+        forced = {t.strip().upper() for t in tickers if t and t.strip().upper() in held}
+        await self._evaluate(gated, force=forced)
         # World-market impact: theme-route the headline so only the relevant
         # macro (Family B) experts re-read, instead of the whole roster.
         # Debounced so a burst of items triggers a single re-evaluation.
