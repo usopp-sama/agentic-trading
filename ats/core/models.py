@@ -196,6 +196,28 @@ class PnlDaily(Base):
     drawdown: Mapped[float] = mapped_column(Float, default=0.0)
 
 
+class LedgerEntry(Base):
+    """One journaled money movement on a simulated bank account.
+
+    The 'passbook': every deposit, withdrawal, reservation (order staged),
+    release (order cancelled/rejected) and settlement (fill) is one row, with
+    the running balance after the entry. Append-only; never updated.
+    """
+
+    __tablename__ = "ledger_entries"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, index=True, default=_utcnow)
+    account: Mapped[str] = mapped_column(String(24), index=True)
+    # DEPOSIT / WITHDRAW / RESERVE / RELEASE / SETTLE_DEBIT / SETTLE_CREDIT
+    kind: Mapped[str] = mapped_column(String(16), index=True)
+    amount: Mapped[float] = mapped_column(Float)  # signed effect on cash (0 for RESERVE/RELEASE)
+    reserved_delta: Mapped[float] = mapped_column(Float, default=0.0)  # signed effect on holds
+    ref: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)  # order/decision ref
+    note: Mapped[str] = mapped_column(String(256), default="")
+    cash_after: Mapped[float] = mapped_column(Float)
+    reserved_after: Mapped[float] = mapped_column(Float)
+
+
 class Strategy(Base):
     __tablename__ = "strategies"
     id: Mapped[str] = mapped_column(String(64), primary_key=True)

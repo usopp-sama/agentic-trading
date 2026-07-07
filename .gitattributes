@@ -1,0 +1,23 @@
+# Normalize line endings: store LF in the repo, check out LF everywhere.
+# (Python, YAML, HTML, JS, MD are all LF-safe; this ends the CRLF churn on Windows.)
+* text=auto eol=lf
+
+# Windows scripts that genuinely need CRLF
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binaries — never touch
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.parquet binary
+*.db binary
+*.sqlite binary
+*.rar binary
+*.zip binary
+*.7z binary
