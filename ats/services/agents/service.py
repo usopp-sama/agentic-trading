@@ -161,6 +161,10 @@ class AgentService:
         from ats.core.config import get_settings
 
         s = get_settings()
+        # WS-3: with the SME trade path off, spikes spend no LLM tokens — the
+        # spike is already persisted for the slow loop's weekly research read.
+        if not s.sme_trade_path:
+            return
         symbol = evt.payload.get("symbol")
         gated = rank_symbols(
             [symbol] if symbol else [],
@@ -179,6 +183,11 @@ class AgentService:
         from ats.core.config import get_settings
 
         s = get_settings()
+        # WS-3: with the SME trade path off, the news->SME fan-out (the
+        # expensive path) is severed. The item is already scored + archived
+        # (NLP), and the severity flag still protects the fast loop.
+        if not s.sme_trade_path:
+            return
         tickers = evt.payload.get("tickers", [])
         # Portfolio/watchlist impact: a capped, de-duped, universe-filtered set
         # of the named tickers get a fresh symbol-scope SME read.
@@ -262,7 +271,16 @@ class AgentService:
                 weights[persona["id"]] = self._effective_weight(persona)
 
         proposal = self._cio.aggregate(symbol, opinions, weights, self._macro_tilt)
-        if self._bus is not None and proposal.action != "HOLD":
+        from ats.core.config import get_settings
+
+        # WS-3: with the SME trade path off, the CIO's view is analysis only —
+        # it never becomes an order. Manual console runs still get the full
+        # opinions + synthesis to read.
+        if (
+            self._bus is not None
+            and proposal.action != "HOLD"
+            and get_settings().sme_trade_path
+        ):
             await self._bus.publish(Topic.PROPOSAL, proposal.model_dump(mode="json"))
         return opinions, proposal
 

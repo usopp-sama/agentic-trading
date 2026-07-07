@@ -163,6 +163,16 @@ class Settings(BaseSettings):
     # review, rather than silently burning a large-token request. 0 = no cap.
     llm_max_prompt_chars: int = 24000
 
+    # --- SME trade path (plan WS-3; A/B decision locked 2026-07-07) -------
+    # True (default): the legacy news/spike -> SME -> CIO -> proposal
+    # autonomous path stays live in paper for the 3-month A/B against the
+    # three-loop design; the October evaluation decides its fate.
+    # False: SMEs stop reacting to news/spikes and CIO proposals stop
+    # publishing — news still flows into the archive + the local-NLP severity
+    # flag, and the Experts console stays fully manual. Code is kept, not
+    # deleted, so the A/B can be re-run any time.
+    sme_trade_path: bool = True
+
     # --- Trading mode + the real-money gate -------------------------------
     # mode: OFF | PAPER | APPROVAL | AUTO. v1 default PAPER.
     trading_mode: str = "PAPER"
