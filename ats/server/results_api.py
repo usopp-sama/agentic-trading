@@ -132,6 +132,32 @@ def strategies(request: Request):
 
 
 # --------------------------------------------------------------------------- #
+# League — segregated solo accounts vs main vs benchmark (plan §9/§10)
+# --------------------------------------------------------------------------- #
+_ACCOUNT_RE = re.compile(r"^[a-z0-9_]{1,24}$")
+
+
+@router.get("/league")
+def league(request: Request):
+    orch = _orch(request)
+    svc = orch.get("league") if orch else None
+    if svc is None or not hasattr(svc, "league_table"):
+        return {"table": [], "curves": {}, "enabled": False}
+    return {**svc.league_table(), "enabled": True}
+
+
+@router.get("/league/{account}")
+def league_account(account: str, request: Request):
+    if not _ACCOUNT_RE.match(account or ""):
+        return {"error": "invalid account"}
+    orch = _orch(request)
+    svc = orch.get("league") if orch else None
+    if svc is None:
+        return {"error": "league unavailable"}
+    return svc.account_detail(account)
+
+
+# --------------------------------------------------------------------------- #
 # Candles + annotations (Lightweight-Charts shaped)
 # --------------------------------------------------------------------------- #
 @router.get("/ohlcv")

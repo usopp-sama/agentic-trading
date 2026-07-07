@@ -174,12 +174,17 @@ class StrategyService:
         per_symbol[sig.strategy] = sig
         changed = prev is None or prev.stance != sig.stance
         if sig.stance != Stance.NEUTRAL and changed:
-            # Shadow strategies are recorded (track record + dashboard) but do
-            # NOT publish to the bus, so they never reach risk/execution and
-            # take no capital until promoted to "paper" by the backtest gate.
+            # Shadow strategies are recorded (track record + dashboard) and
+            # published with a ``shadow`` marker: the consensus trader ignores
+            # marked signals (no capital in the main book until the backtest
+            # gate promotes them), but the league can still run their solo
+            # accounts so a shadow strategy competes with its own money.
             self._persist(sig)
-            if self._bus is not None and not shadow:
-                await self._bus.publish(Topic.SIGNAL, sig.model_dump(mode="json"))
+            if self._bus is not None:
+                await self._bus.publish(
+                    Topic.SIGNAL,
+                    {**sig.model_dump(mode="json"), "shadow": shadow},
+                )
 
     # --- sleeves -------------------------------------------------------------
     async def _mark_sleeves(self, symbol: str, df: pd.DataFrame) -> None:

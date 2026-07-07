@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block title %}League{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="card span12 reveal">
+    <h2>The strategy league</h2>
+    <p class="sub">
+      Every account starts with the same paper capital and trades its own way:
+      <b>main</b> is the blended system book, each <b>solo</b> account is one
+      strategy with full autonomy over its own money, and <b>benchmark</b> just
+      bought NIFTYBEES on day 1 and held — the bar everyone must clear.
+      Click a row for its passbook and trades.
+    </p>
+    <div class="llm-controls">
+      <label class="chk"><input type="checkbox" id="fAuto" checked> Auto-refresh</label>
+      <button id="fRefresh">Refresh</button>
+      <span class="spacer"></span>
+      <span class="muted" id="leagueStats"></span>
+    </div>
+  </div>
+
+  <div class="card span12 reveal">
+    <h3>Equity curves — growth of 100</h3>
+    <p class="sub">Each account's daily equity normalized to 100 at inception, so books of different sizes compare directly.</p>
+    <div id="curveWrap" style="overflow-x:auto">
+      <svg id="curves" width="100%" height="320" viewBox="0 0 1000 320" preserveAspectRatio="none"></svg>
+    </div>
+    <div id="curveLegend" class="sub"></div>
+  </div>
+
+  <div class="card span12 reveal">
+    <h3>Standings</h3>
+    <div style="overflow:auto">
+      <table>
+        <thead><tr>
+          <th>#</th><th>Account</th><th>Equity</th><th>Return</th>
+          <th>Sharpe</th><th>Max DD</th><th>Trades</th><th>Fees paid</th>
+          <th>Open</th><th>Realized</th><th>Unrealized</th>
+        </tr></thead>
+        <tbody id="standings"><tr><td colspan="11" class="muted">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card span12 reveal" id="detailCard" style="display:none">
+    <h3 id="detailTitle">Account</h3>
+    <div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <h4>Open positions</h4>
+        <div style="overflow:auto;max-height:260px">
+          <table><thead><tr><th>Symbol</th><th>Qty</th><th>Avg</th><th>Mark</th><th>Unrealized</th></tr></thead>
+          <tbody id="detailPositions"></tbody></table>
+        </div>
+        <h4 style="margin-top:12px">Orders</h4>
+        <div style="overflow:auto;max-height:300px">
+          <table><thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Fill</th><th>Fees</th><th>Status</th></tr></thead>
+          <tbody id="detailOrders"></tbody></table>
+        </div>
+      </div>
+      <div>
+        <h4>Passbook <span class="muted" id="detailBalance"></span></h4>
+        <div style="overflow:auto;max-height:600px">
+          <table><thead><tr><th>Time</th><th>Entry</th><th>Amount</th><th>Ref</th><th>Cash after</th></tr></thead>
+          <tbody id="detailPassbook"></tbody></table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+(function () {
+  const A = window.ATS;
+  const COLORS = ["#4f9cf9", "#f9a04f", "#5fd38a", "#e35d6a", "#b78af9",
+                  "#f9dc4f", "#4fd8f9", "#f94fb1", "#9cf94f", "#8a93a6"];
+  let lastSig = null;
+
+  function fmtPct(x) { return (x === null || x === undefined) ? "–" : `${Number(x).toFixed(2)}%`; }
+  function num(x, d = 2) { return (x === null || x === undefined) ? "–" : Number(x).toFixed(d); }
+  function cls(x) { return x > 0 ? "pos" : (x < 0 ? "neg" : ""); }
+
+  function drawCurves(curves) {
+    const svg = document.getElementById("curves");
+    const legend = document.getElementById("curveLegend");
+    const names = Object.keys(curves).filter((k) => (curves[k] || []).length >= 2);
+    if (!names.length) {
+      svg.innerHTML = '<text x="500" y="160" text-anchor="middle" fill="currentColor" opacity="0.5">Curves appear after the first daily equity snapshots.</text>';
+      legend.innerHTML = "";
+      return;
+    }
+    let lo = Infinity, hi = -Infinity, maxLen = 0;
+    names.forEach((n) => {
+      curves[n].forEach((p) => { lo = Math.min(lo, p.norm); hi = Math.max(hi, p.norm); });
+      maxLen = Math.max(maxLen, curves[n].length);
+    });
+    if (hi - lo < 1) { lo -= 1; hi += 1; }
+    const X = (i) => 20 + (960 * i) / Math.max(1, maxLen - 1);
+    const Y = (v) => 300 - (280 * (v - lo)) / (hi - lo);
+    let out = `<line x1="20" y1="${Y(100)}" x2="980" y2="${Y(100)}" stroke="currentColor" opacity="0.25" stroke-dasharray="4 4"/>`;
+    out += `<text x="24" y="${Y(100) - 5}" fill="currentColor" opacity="0.5" font-size="11">100</text>`;
+    names.forEach((n, ix) => {
+      const pts = curves[n].map((p, i) => `${X(i)},${Y(p.norm)}`).join(" ");
+      const w = (n === "benchmark" || n === "paper") ? 2.5 : 1.5;
+      out += `<polyline points="${pts}" fill="none" stroke="${COLORS[ix % COLORS.length]}" stroke-width="${w}"/>`;
+    });
+    svg.innerHTML = out;
+    legend.innerHTML = names.map((n, ix) =>
+      `<span class="chip"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${COLORS[ix % COLORS.length]};margin-right:4px"></span>${A.esc(n)}</span>`
+    ).join(" ");
+  }
+
+  function renderTable(d) {
+    const el = document.getElementById("standings");
+    const rows = d.table || [];
+    if (!rows.length) { el.innerHTML = '<tr><td colspan="11" class="muted">League not started yet.</td></tr>'; return; }
+    el.innerHTML = rows.map((r, i) => `
+      <tr class="rowlink" data-account="${A.esc(r.account)}" style="cursor:pointer">
+        <td>${i + 1}</td>
+        <td><b>${A.esc(r.label)}</b> <span class="muted">${A.esc(r.account)}</span></td>
+        <td>${A.fmtMoney(r.equity)}</td>
+        <td class="${cls(r.return_pct)}">${fmtPct(r.return_pct)}</td>
+        <td>${num(r.sharpe)}</td>
+        <td class="${cls(r.max_dd_pct)}">${fmtPct(r.max_dd_pct)}</td>
+        <td>${r.trades}</td>
+        <td>${A.fmtMoney(r.fees)}</td>
+        <td>${r.positions}</td>
+        <td class="${cls(r.realized_pnl)}">${A.fmtMoney(r.realized_pnl)}</td>
+        <td class="${cls(r.unrealized_pnl)}">${A.fmtMoney(r.unrealized_pnl)}</td>
+      </tr>`).join("");
+    el.querySelectorAll("tr.rowlink").forEach((tr) =>
+      tr.addEventListener("click", () => loadDetail(tr.dataset.account)));
+  }
+
+  function loadDetail(account) {
+    A.fetchJSON(`/api/league/${encodeURIComponent(account)}`).then((d) => {
+      if (d.error) return;
+      document.getElementById("detailCard").style.display = "";
+      document.getElementById("detailTitle").textContent =
+        `Account: ${account}` + (d.strategy ? ` — strategy ${d.strategy}` : "");
+      const b = d.balance || {};
+      document.getElementById("detailBalance").textContent =
+        ` cash ${A.fmtMoney(b.cash)} · reserved ${A.fmtMoney(b.reserved)} · available ${A.fmtMoney(b.available)}`;
+      const pos = (d.snapshot || {}).positions || [];
+      document.getElementById("detailPositions").innerHTML = pos.length ? pos.map((p) =>
+        `<tr><td>${A.esc(p.symbol)}</td><td>${p.qty}</td><td>${num(p.avg_price)}</td>
+         <td>${num(p.last_price)}</td><td class="${cls(p.unrealized_pnl)}">${A.fmtMoney(p.unrealized_pnl || 0)}</td></tr>`).join("")
+        : '<tr><td colspan="5" class="muted">Flat.</td></tr>';
+      const orders = d.orders || [];
+      document.getElementById("detailOrders").innerHTML = orders.length ? orders.map((o) =>
+        `<tr><td>${A.esc((o.ts || "").replace("T", " ").slice(0, 16))}</td><td>${A.esc(o.symbol)}</td>
+         <td><span class="side ${o.side === "BUY" ? "LONG" : "SHORT"}">${A.esc(o.side)}</span></td>
+         <td>${o.qty}</td><td>${num(o.fill_price)}</td><td>${num(o.fees)}</td>
+         <td><span class="pill ${o.status === "FILLED" ? "green" : (o.status === "REJECTED" ? "red" : "gray")}">${A.esc(o.status)}</span></td></tr>`).join("")
+        : '<tr><td colspan="7" class="muted">No orders yet.</td></tr>';
+      const pb = d.passbook || [];
+      document.getElementById("detailPassbook").innerHTML = pb.length ? pb.map((e) =>
+        `<tr><td>${A.esc((e.ts || "").replace("T", " ").slice(0, 16))}</td>
+         <td><span class="pill ${e.kind.startsWith("SETTLE") ? "blue" : (e.kind === "DEPOSIT" ? "green" : "gray")}">${A.esc(e.kind)}</span>
+             <span class="muted">${A.esc(e.note || "")}</span></td>
+         <td class="${cls(e.amount)}">${A.fmtMoney(e.amount)}</td>
+         <td class="muted">${A.esc(e.ref || "")}</td>
+         <td>${A.fmtMoney(e.cash_after)}</td></tr>`).join("")
+        : '<tr><td colspan="5" class="muted">Empty passbook.</td></tr>';
+      document.getElementById("detailCard").scrollIntoView({ behavior: "smooth" });
+    }).catch(() => {});
+  }
+
+  function render(d) {
+    if (!d.enabled) {
+      document.getElementById("leagueStats").textContent = "League disabled (ATS_LEAGUE_ENABLED=false)";
+      return;
+    }
+    const rows = d.table || [];
+    const bench = rows.find((r) => r.account === "benchmark");
+    const above = bench ? rows.filter((r) => r.return_pct > bench.return_pct && r.account !== "benchmark").length : 0;
+    document.getElementById("leagueStats").textContent =
+      `${rows.length} accounts · funded ${A.fmtMoney(d.capital)} each · ${above} beating the benchmark`;
+    const sig = JSON.stringify(rows.map((r) => [r.account, r.equity, r.trades]));
+    if (sig === lastSig) return;
+    lastSig = sig;
+    renderTable(d);
+    drawCurves(d.curves || {});
+  }
+
+  function load() { A.fetchJSON("/api/league").then(render).catch(() => {}); }
+  function reload() { lastSig = null; load(); }
+  document.getElementById("fRefresh").addEventListener("click", reload);
+  setInterval(() => { if (document.getElementById("fAuto").checked) load(); }, 10000);
+  load();
+})();
+</script>
+{% endblock %}

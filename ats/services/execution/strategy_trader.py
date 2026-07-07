@@ -68,6 +68,10 @@ class StrategyTraderService:
         strategy = payload.get("strategy")
         if not symbol or not strategy:
             return {"status": "skipped"}
+        # Shadow strategies publish for the league's solo accounts only; their
+        # votes never enter the main-book consensus until promoted.
+        if payload.get("shadow"):
+            return {"status": "shadow"}
         # Indices / reference feeds are never tradeable; don't even propose.
         if symbol.startswith("^"):
             return {"status": "not_tradeable"}

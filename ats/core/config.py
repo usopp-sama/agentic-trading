@@ -236,6 +236,22 @@ class Settings(BaseSettings):
     # Per-symbol cooldown between strategy-driven orders (anti-churn), seconds.
     strategy_trade_cooldown_s: int = 300
 
+    # --- Strategy league: segregated solo accounts + benchmark (plan §9) ---
+    # Every roster strategy gets its own simulated bank account + broker
+    # connection (solo_<id>) funded with the same capital, plus a buy-and-hold
+    # NIFTYBEES `benchmark` account — the bar everyone must clear. The /league
+    # page compares them. Solo trading is signal-driven (no consensus, no LLM)
+    # and runs the same immutable per-account guardrails scaled to its equity.
+    league_enabled: bool = True
+    league_capital: float = 100_000.0  # Rs 1L each, so PnL% is comparable
+    # "auto" = all paper-status equity strategies (vol_premium excluded — it
+    # runs its own options book). Or a comma-separated list of strategy ids,
+    # which may include shadow strategies (their solo book trades real paper
+    # money in the league even while their consensus voice stays shadow).
+    league_strategies: str = "auto"
+    league_benchmark_symbol: str = "NIFTYBEES.NS"
+    league_snapshot_interval_s: int = 300
+
     # --- External data API keys (free-tier v1 stack; optional) ---
     marketaux_api_key: str = Field(default="", repr=False)
     alphavantage_api_key: str = Field(default="", repr=False)
