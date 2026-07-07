@@ -120,6 +120,49 @@ def set_mode(mode: str = Body(embed=True)) -> dict:
     return {"mode": new_mode}
 
 
+def _service(request: Request, name: str):
+    orch = getattr(request.app.state, "orchestrator", None)
+    return orch.get(name) if orch else None
+
+
+@router.get("/recon")
+def recon_status(request: Request) -> dict:
+    svc = _service(request, "reconcile")
+    return svc.status() if svc else {"halted": False, "last": {}}
+
+
+@router.post("/recon/run")
+def recon_run(request: Request) -> dict:
+    svc = _service(request, "reconcile")
+    return svc.run_sync() if svc else {"status": "unavailable"}
+
+
+@router.post("/recon/release")
+def recon_release(request: Request) -> dict:
+    svc = _service(request, "reconcile")
+    return svc.release(actor="human") if svc else {"status": "unavailable"}
+
+
+@router.get("/vetoes")
+def vetoes(request: Request) -> dict:
+    svc = _service(request, "event_risk")
+    return svc.status() if svc else {}
+
+
+@router.post("/veto")
+def set_veto(
+    request: Request,
+    symbol: str | None = Body(embed=True, default=None),
+    engage: bool = Body(embed=True, default=True),
+    reason: str = Body(embed=True, default=""),
+) -> dict:
+    """Manual entry veto: per symbol, or global when symbol is omitted."""
+    svc = _service(request, "event_risk")
+    if not svc:
+        return {"status": "unavailable"}
+    return svc.set_manual_veto(symbol, engage, actor="human", reason=reason)
+
+
 @router.get("/approvals")
 def list_approvals(request: Request) -> dict:
     ex = _execution(request)

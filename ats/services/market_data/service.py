@@ -38,6 +38,7 @@ class MarketDataService:
         self._bus: EventBus | None = None
         self._history: dict[str, pd.DataFrame] = {}
         self._last_price: dict[str, float] = {}
+        self._quote_ts: dict[str, float] = {}  # symbol -> monotonic-ish epoch of last refresh
         self._symbols: list[str] = []
         self._closed_logged = False
         self._was_degraded = False
@@ -129,6 +130,9 @@ class MarketDataService:
         self._history[symbol] = df
         last_close = float(df["close"].iloc[-1])
         self._last_price[symbol] = last_close
+        import time as _time
+
+        self._quote_ts[symbol] = _time.time()
         if self._bus is not None:
             await self._bus.publish(
                 Topic.BAR,
@@ -163,6 +167,17 @@ class MarketDataService:
 
     def latest_price(self, symbol: str) -> float | None:
         return self._last_price.get(symbol)
+
+    def quote_age_s(self, symbol: str) -> float | None:
+        """Seconds since this symbol's quote was last refreshed by a poll;
+        None if it has not been polled this session (startup backfill does
+        not count — a fill must never price off a stale cache)."""
+        import time as _time
+
+        ts = self._quote_ts.get(symbol)
+        if ts is None:
+            return None
+        return max(0.0, _time.time() - ts)
 
     def intraday(self, symbol: str, interval: str = "5m", limit: int = 300) -> list[dict]:
         """Intraday candles from the source when it supports them (nse_live);

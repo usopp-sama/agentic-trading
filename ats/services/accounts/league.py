@@ -69,6 +69,7 @@ class LeagueService:
 
     def __init__(self) -> None:
         self._md = None
+        self._orch = None
         self._broker: BrokerSim | None = None
         self._roster: dict[str, str] = {}   # strategy_id -> account
         self._itypes: dict[str, str] = {}
@@ -80,6 +81,7 @@ class LeagueService:
         if not settings.league_enabled:
             log.info("league_disabled")
             return
+        self._orch = ctx.orchestrator
         self._md = ctx.orchestrator.get("market_data")
         self._broker = BrokerSim(price_fn=self.price_of)
         self._roster = league_roster(settings)
@@ -195,6 +197,15 @@ class LeagueService:
         settings = get_settings()
         if self._daily_loss_blocked(account, settings):
             return {"status": "entry_blocked_daily_loss"}
+        from ats.services.execution.reconcile import entries_halted
+
+        if entries_halted():
+            return {"status": "entry_blocked_recon_halt"}
+        event_risk = self._orch.get("event_risk") if self._orch else None
+        if event_risk is not None:
+            vetoes = event_risk.active_vetoes(symbol)
+            if vetoes:
+                return {"status": "vetoed", "vetoes": vetoes}
         price = self.price_of(symbol)
         if not price or price <= 0:
             return {"status": "no_price"}

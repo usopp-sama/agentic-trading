@@ -208,6 +208,29 @@ class Settings(BaseSettings):
     max_orders_per_min: int = 30
     max_trade_value: float = 50_000.0    # absolute per-order cap
 
+    # --- Fast-loop protections (plan §1) ---
+    # Refuse to submit a BUY against a quote older than this many seconds
+    # (0 disables). 90s is generous for paper's 60s poll; tighten for live.
+    max_quote_age_s: float = 90.0
+    # Price-deviation guard: if the price moved more than this many bps
+    # between decision and submission, don't chase — block and let the next
+    # signal re-propose (0 disables).
+    max_price_deviation_bps: float = 50.0
+    # Event-risk veto gate: calendar file (YAML; see risk/event_calendar.py),
+    # F&O-expiry veto toggle, and the local-NLP severity flag (an extreme
+    # negative sentiment burst on a name blocks new entries for the session).
+    event_calendar_path: str = str(DATA_DIR / "event_calendar.yaml")
+    veto_fo_expiry: bool = True
+    severity_veto_score: float = -0.5   # mean score at/below this ...
+    severity_veto_min_count: int = 3    # ... across at least this many items
+    severity_veto_window_min: int = 60  # ... within this window (minutes)
+    # Reconciliation: internal book vs broker/ledger truth. Any mismatch halts
+    # NEW entries until a human releases. Daily in paper (IST, after close);
+    # optional interval for live later (0 = cron only).
+    recon_hour: int = 15
+    recon_minute: int = 40
+    recon_interval_s: int = 0
+
     # --- Regime detection (roadmap Part 7.12) ---
     regime_reference_symbol: str = "^NSEI"  # index the regime is read from
     regime_crisis_scale: float = 0.5     # cut new-exposure sizing in crisis vol

@@ -146,7 +146,39 @@ class ExecutionService:
         if side == "BUY" and self._feed_degraded():
             log.warning("entry_blocked_feed_degraded", extra={"symbol": symbol})
             return {"status": "BLOCKED", "reason": "feed_degraded"}
+
+        # Quote-staleness gate (plan §1.1): never BUY against a quote older
+        # than the configured age. A quote never refreshed this session (age
+        # None) is stale by definition. Exits still pass.
+        from ats.core.config import get_settings
+
+        settings = get_settings()
+        if side == "BUY" and settings.max_quote_age_s > 0:
+            age_fn = getattr(self._md, "quote_age_s", None)
+            age = age_fn(symbol) if age_fn is not None else None
+            if age is None or age > settings.max_quote_age_s:
+                log.warning("entry_blocked_stale_quote",
+                            extra={"symbol": symbol, "age_s": age})
+                if decision.get("decision_id") is not None:
+                    self._mark_decision(decision["decision_id"], "stale_quote")
+                return {"status": "BLOCKED", "reason": "stale_quote", "age_s": age}
+
         price = self.price_of(symbol) or 0.0
+
+        # Price-deviation guard (plan §1.4): if the market moved more than the
+        # configured bps between decision and submission, don't chase — the
+        # next signal pass re-proposes against the fresh price.
+        ref_price = float(decision.get("ref_price") or 0.0)
+        if ref_price > 0 and price > 0 and settings.max_price_deviation_bps > 0:
+            deviation_bps = abs(price / ref_price - 1.0) * 10_000.0
+            if deviation_bps > settings.max_price_deviation_bps:
+                log.warning("order_blocked_price_deviation",
+                            extra={"symbol": symbol, "ref": ref_price,
+                                   "ltp": price, "bps": round(deviation_bps, 1)})
+                if decision.get("decision_id") is not None:
+                    self._mark_decision(decision["decision_id"], "price_moved")
+                return {"status": "BLOCKED", "reason": "price_deviation",
+                        "deviation_bps": round(deviation_bps, 1)}
         draft = Draft(
             decision_id=decision.get("decision_id"),
             symbol=symbol, side=side, qty=qty, est_price=price, use_real=route.use_real,

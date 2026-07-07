@@ -98,6 +98,24 @@ class RiskService:
             )
             regime_applied.append("regime:crisis_scale")
 
+        # Fast-loop protective gates — they block only exposure INCREASES;
+        # exits and risk reductions always pass (plan §1.2/§1.5).
+        if desired > current_qty:
+            from ats.services.execution.reconcile import entries_halted
+
+            if entries_halted():
+                self._record_decision(proposal, "HOLD", 0, ["recon_halt"], status="blocked")
+                log.warning("entry_blocked_recon_halt", extra={"symbol": symbol})
+                return {"status": "blocked", "applied": ["recon_halt"]}
+            event_risk = self._orch.get("event_risk") if self._orch else None
+            if event_risk is not None:
+                vetoes = event_risk.active_vetoes(symbol)
+                if vetoes:
+                    applied = [f"veto:{v}" for v in vetoes]
+                    self._record_decision(proposal, "HOLD", 0, applied, status="vetoed")
+                    log.warning("entry_vetoed", extra={"symbol": symbol, "vetoes": vetoes})
+                    return {"status": "vetoed", "applied": applied}
+
         # Rate limit: reject if too many orders in the last 60s.
         if self._rate_limited(settings.max_orders_per_min):
             self._record_decision(proposal, "HOLD", 0, ["rate_limit"], status="blocked")
@@ -145,6 +163,9 @@ class RiskService:
                     "target_qty": abs(result.delta_qty),
                     "decision_id": decision_id,
                     "mode": state.get_mode(),
+                    # Reference price this decision was sized at, for the
+                    # execution-side price-deviation guard (plan §1.4).
+                    "ref_price": price,
                 },
             )
         return {"status": "approved", "side": result.side, "qty": abs(result.delta_qty), "applied": result.applied}
