@@ -74,17 +74,28 @@
         `<span class="muted" title="rolling sleeve Sharpe">Sharpe ${num(s.sharpe)}</span>`;
       const alloc = (s.alloc_weight === null || s.alloc_weight === undefined) ? "" :
         `<span class="muted" title="capital allocation weight">alloc ${(s.alloc_weight * 100).toFixed(0)}%</span>`;
+      const selTitle = { scanner: "evaluates every watchlist name independently",
+                         ranker: "ranks the whole universe, picks top/bottom N",
+                         specialist: "trades a fixed instrument list" }[s.selection] || "";
+      const sel = s.selection ? `<span class="pill gray" title="${selTitle}">${A.esc(s.selection)}</span>` : "";
+      const league = s.league_account ?
+        `<a class="pill blue" href="/league" title="own ₹1L account in the strategy league">${A.esc(s.league_account)}</a>` : "";
+      const universe = (s.instruments && s.instruments.length)
+        ? `<div class="muted" style="margin-top:4px">Allowed instruments: ${s.instruments.map(A.esc).join(", ")}</div>`
+        : `<div class="muted" style="margin-top:4px">Universe: ${s.selection === "ranker" ? "whole watchlist, ranked" : "whole watchlist, scanned per symbol"}</div>`;
       return `<details class="act" data-key="${A.esc(s.id)}" ${open ? "open" : ""}>
         <summary>
           ${statusPill(s.status, s.tradeable)}
           <b>${A.esc(s.name)}</b>
           <span class="muted">${A.esc(s.type)}</span>
+          ${sel} ${league}
           <span class="spacer"></span>
           ${sharpe} ${alloc}
           <span class="pill ${s.n_signals ? "blue" : "gray"}">${s.n_signals} live call${s.n_signals === 1 ? "" : "s"}</span>
         </summary>
         <div class="act-body">
           ${calls || '<span class="muted">No actionable signal right now (neutral / waiting for setup).</span>'}
+          ${universe}
         </div>
       </details>`;
     }).join("");

@@ -71,6 +71,28 @@
     el.className = "pill " + (cls || "gray");
   }
 
+  // ---- Per-loop status pills (fast / medium / slow) ----------------------
+  function refreshLoopPills() {
+    if (!document.getElementById("hdrLoopF")) return;
+    fetchJSON("/api/loops").then((d) => {
+      const f = d.fast || {}, m = d.medium || {}, s = d.slow || {};
+      const feedBad = (f.feed || {}).degraded;
+      const reconBad = ((f.reconciliation || {}).last || {}).ok === false;
+      setPill("hdrLoopF", "F", f.kill_switch ? "red" : (feedBad || reconBad) ? "amber" : "green");
+      const sum = m.summary || {};
+      setPill("hdrLoopM", "M", (sum.total || 0) > 0 ? ((sum.paper || 0) > 0 ? "green" : "amber") : "gray");
+      const fac = s.factory || {};
+      const budget = fac.budget || {};
+      setPill("hdrLoopS", "S", !fac.enabled ? "gray" : budget.exhausted ? "amber" : "green");
+      const titles = {
+        hdrLoopF: `Fast loop: mode ${f.mode || "?"}, ${f.orders_in_flight || 0} in flight` + (f.kill_switch ? " — KILLED" : ""),
+        hdrLoopM: `Medium loop: ${sum.paper || 0}/${sum.total || 0} sleeves trading, ${sum.live_calls || 0} live calls`,
+        hdrLoopS: `Slow loop: budget ₹${(budget.used_inr || 0).toFixed(0)}/${(budget.budget_inr || 0).toFixed(0)}` + (budget.exhausted ? " — exhausted" : ""),
+      };
+      Object.entries(titles).forEach(([id, t]) => { const el = document.getElementById(id); if (el) el.title = t; });
+    }).catch(() => {});
+  }
+
   // ---- Toast notifications ---------------------------------------------
   const TOAST_MS = 6000;
   function maybeToast(msg) {
@@ -260,6 +282,8 @@
     initCursorGlow();
     // Seed header immediately from REST in case first WS snapshot lags.
     fetchJSON("/api/dashboard").then(updateHeader).catch(() => {});
+    refreshLoopPills();
+    setInterval(refreshLoopPills, 30000);
 
     // Alerts bell + browser notifications
     const aBtn = document.getElementById("alertsBtn");

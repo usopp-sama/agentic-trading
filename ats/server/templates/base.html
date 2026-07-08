@@ -17,6 +17,7 @@
       <a href="/strategies"    class="{{ 'active' if active=='strategies'    else '' }}">Strategies</a>
       <a href="/league"        class="{{ 'active' if active=='league'        else '' }}">League</a>
       <a href="/research"      class="{{ 'active' if active=='research'      else '' }}">Research</a>
+      <a href="/loops"         class="{{ 'active' if active=='loops'         else '' }}">Loops</a>
       <a href="/charts"        class="{{ 'active' if active=='charts'        else '' }}">Charts</a>
       <a href="/portfolio"     class="{{ 'active' if active=='portfolio'     else '' }}">Portfolio</a>
       <a href="/activity"      class="{{ 'active' if active=='activity'      else '' }}">Activity</a>
@@ -27,6 +28,9 @@
       <a href="/system"        class="{{ 'active' if active=='system'        else '' }}">System</a>
     </nav>
     <span class="spacer"></span>
+    <a href="/loops" title="Three-loop status — click for detail" style="text-decoration:none">
+      <span class="pill gray" id="hdrLoopF">F</span><span class="pill gray" id="hdrLoopM">M</span><span class="pill gray" id="hdrLoopS">S</span>
+    </a>
     <span class="pill gray" id="hdrData">–</span>
     <span class="muted">equity</span><b id="hdrEquity">–</b>
     <span class="pill gray" id="hdrMoney">–</span>

@@ -11,7 +11,34 @@
   <div class="card span12 reveal">
     <h2>Order activity &amp; why</h2>
     <p class="sub">Every order we placed and the full reasoning behind it — the CIO call, the experts who weighed in, the strategy signals that fired, and the risk rules applied.</p>
+    <div class="llm-controls">
+      <label class="muted">Account
+        <select id="accountSel"><option value="">all accounts</option></select>
+      </label>
+      <button id="csvBtn" title="Download the trade logbook as CSV">Export CSV</button>
+      <span class="spacer"></span>
+      <span class="muted" id="actStats"></span>
+    </div>
     <div id="activity"><div class="empty">No orders yet.</div></div>
+  </div>
+
+  <div class="card span12 reveal">
+    <h2>Closed trades — was the exit any good?</h2>
+    <p class="sub">
+      Round trips with the outcome fields that matter: holding period, realized P&amp;L
+      <b>after fees</b>, best/worst excursion while held, and what NIFTYBEES did over the
+      same window — a trade that made 2% while the index made 3% is a loss in disguise.
+    </p>
+    <div style="overflow:auto">
+      <table>
+        <thead><tr>
+          <th>Exit</th><th>Account</th><th>Symbol</th><th>Qty</th><th>Held</th>
+          <th>Entry→Exit</th><th>Net P&amp;L</th><th>Return</th><th>MFE / MAE</th>
+          <th>NIFTYBEES</th><th>Alpha</th>
+        </tr></thead>
+        <tbody id="outcomes"><tr><td colspan="11" class="muted">No closed trades yet.</td></tr></tbody>
+      </table>
+    </div>
   </div>
 </div>
 {% endblock %}
@@ -19,6 +46,7 @@
 <script>
 (function () {
   const A = window.ATS;
+  let account = "";
 
   function stancePill(stance) {
     const s = (stance || "").toLowerCase();
@@ -64,6 +92,18 @@
   function renderActivity(d) {
     const el = document.getElementById("activity");
     const items = (d && d.activity) || [];
+    // Keep the account dropdown in sync with every book that ever traded.
+    const sel = document.getElementById("accountSel");
+    const known = new Set(Array.from(sel.options).map((o) => o.value));
+    (d.accounts || []).forEach((a) => {
+      if (!known.has(a)) {
+        const opt = document.createElement("option");
+        opt.value = a; opt.textContent = a;
+        sel.appendChild(opt);
+      }
+    });
+    document.getElementById("actStats").textContent =
+      `${items.length} fills shown${account ? ` · account ${account}` : " · all accounts"}`;
     if (!items.length) { el.innerHTML = '<div class="empty">No orders yet.</div>'; return; }
     el.innerHTML = items.map((t, i) => {
       const side = (t.side === "BUY") ? "LONG" : "SHORT";
@@ -71,6 +111,7 @@
         <summary>
           <span class="side ${side}">${A.esc(t.side)}</span>
           <b>${A.esc(t.symbol)}</b>
+          <span class="pill gray">${A.esc(t.account || "paper")}</span>
           <span class="muted">${A.esc(t.qty)} @ ${A.fmt(t.price)} = ${A.fmtMoney(t.value)}</span>
           <span class="spacer"></span>
           <span class="muted">${A.esc((t.ts || "").replace("T", " ").slice(0, 16))}</span>
@@ -81,6 +122,27 @@
         </div>
       </details>`;
     }).join("");
+  }
+
+  function renderOutcomes(d) {
+    const el = document.getElementById("outcomes");
+    const rows = (d && d.trades) || [];
+    if (!rows.length) { el.innerHTML = '<tr><td colspan="11" class="muted">No closed trades yet.</td></tr>'; return; }
+    const pct = (x) => (x === null || x === undefined) ? "–" : `${x >= 0 ? "+" : ""}${Number(x).toFixed(2)}%`;
+    el.innerHTML = rows.map((t) => `
+      <tr>
+        <td>${A.esc((t.exit_ts || "").replace("T", " ").slice(0, 16))}</td>
+        <td><span class="pill gray">${A.esc(t.account)}</span></td>
+        <td><b>${A.esc(t.symbol)}</b></td>
+        <td>${t.qty}</td>
+        <td>${t.holding_days === null ? "–" : t.holding_days + "d"}</td>
+        <td class="muted">${A.fmt(t.entry_price)} → ${A.fmt(t.exit_price)}</td>
+        <td class="${A.signClass(t.net_pnl)}">${A.fmtMoney(t.net_pnl)} <span class="muted">(fees ${A.fmt(t.fees)})</span></td>
+        <td class="${A.signClass(t.return_pct)}">${pct(t.return_pct)}</td>
+        <td><span class="pos">${pct(t.mfe_pct)}</span> / <span class="neg">${pct(t.mae_pct)}</span></td>
+        <td>${pct(t.benchmark_return_pct)}</td>
+        <td class="${A.signClass(t.alpha_pct)}"><b>${pct(t.alpha_pct)}</b></td>
+      </tr>`).join("");
   }
 
   function renderSummary(s) {
@@ -95,12 +157,22 @@
       : "";
   }
 
-  A.fetchJSON("/api/summary").then(renderSummary).catch(() => {});
-  A.fetchJSON("/api/activity?limit=100").then(renderActivity).catch(() => {});
-  A.on("snapshot", () => {
+  function qs() { return account ? `&account=${encodeURIComponent(account)}` : ""; }
+  function loadAll() {
     A.fetchJSON("/api/summary").then(renderSummary).catch(() => {});
-    A.fetchJSON("/api/activity?limit=100").then(renderActivity).catch(() => {});
+    A.fetchJSON(`/api/activity?limit=100${qs()}`).then(renderActivity).catch(() => {});
+    A.fetchJSON(`/api/activity/outcomes?limit=50${qs()}`).then(renderOutcomes).catch(() => {});
+  }
+
+  document.getElementById("accountSel").addEventListener("change", (e) => {
+    account = e.target.value; loadAll();
   });
+  document.getElementById("csvBtn").addEventListener("click", () => {
+    window.location.href = `/api/activity/export.csv?limit=2000${qs()}`;
+  });
+
+  loadAll();
+  A.on("snapshot", loadAll);
 })();
 </script>
 {% endblock %}

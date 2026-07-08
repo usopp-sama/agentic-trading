@@ -290,6 +290,7 @@ class StrategyService:
         and its virtual sleeve stats. ``paper`` strategies are the ones that can
         actually trade (StrategyTraderService acts on their consensus).
         """
+        from ats.services.accounts.league import league_roster
         from ats.services.reference import STRATEGIES as _ROSTER
 
         by_strategy: dict[str, list[dict]] = {}
@@ -303,12 +304,32 @@ class StrategyService:
         for sid in by_strategy:
             by_strategy[sid].sort(key=lambda r: -r["conviction"])
 
+        # Universe-selection pattern (plan §8.2): scanners evaluate every
+        # watchlist name independently; rankers see the whole universe at
+        # once; specialists carry a hard-coded instrument list.
+        selection: dict[str, tuple[str, list[str]]] = {}
+        for strat in self._strategies:
+            selection[strat.id] = ("scanner", [])
+        for strat in self._universe_strategies:
+            pinned = strat.symbols()
+            selection[strat.id] = (
+                ("specialist", pinned) if pinned else ("ranker", [])
+            )
+        # Runs in its own options book, not this service — still a specialist.
+        selection.setdefault("vol_premium", ("specialist", ["NIFTY options"]))
+
+        try:
+            solo_accounts = league_roster()
+        except Exception:  # noqa: BLE001 — league config must not break the page
+            solo_accounts = {}
+
         sleeves = {s.get("strategy"): s for s in self.sleeve_stats()}
         roster: list[dict] = []
         for sid, name, stype, default_status in _ROSTER:
             status = self._status.get(sid, default_status)
             sl = sleeves.get(sid, {})
             signals = by_strategy.get(sid, [])
+            sel, instruments = selection.get(sid, ("scanner", []))
             roster.append(
                 {
                     "id": sid,
@@ -316,6 +337,9 @@ class StrategyService:
                     "type": stype,
                     "status": status,
                     "tradeable": status == "paper",
+                    "selection": sel,
+                    "instruments": instruments,
+                    "league_account": solo_accounts.get(sid),
                     "signals": signals,
                     "n_signals": len(signals),
                     "sleeve_equity": sl.get("equity"),

@@ -340,17 +340,29 @@ def equity_curve(request: Request,
 # Activity log: every order + the full "why" behind it
 # --------------------------------------------------------------------------- #
 @router.get("/activity")
-def activity(request: Request, limit: int = Query(50, ge=1, le=200)):
+def activity(request: Request, limit: int = Query(50, ge=1, le=200),
+             account: str = Query("", max_length=24)):
     """Per-order audit trail: what we did and *why* — the CIO rationale, the
     contributing SME opinions (stance/conviction/rationale/risks), the strategy
     signals that fired (with their feature reasoning), and the risk rules that
-    were applied. This is the dashboard "Activity" tab's data source."""
+    were applied. This is the dashboard "Activity" tab's data source.
+
+    ``account`` filters to one book (main, a solo league account, benchmark…)
+    in the multi-account world; empty = every account."""
+    if account and not _valid_symbol(account):
+        return {"error": "invalid account"}
     out: list[dict] = []
     with session_scope() as s:
-        rows = s.execute(
+        q = (
             select(Fill, Order).join(Order, Fill.order_id == Order.id)
             .order_by(Fill.id.desc()).limit(limit)
-        ).all()
+        )
+        if account:
+            q = q.where(Order.account == account)
+        rows = s.execute(q).all()
+        accounts = sorted(
+            a for (a,) in s.execute(select(Order.account).distinct()).all() if a
+        )
         dec_ids = {o.decision_id for _, o in rows if o.decision_id}
         decs: dict[int, Decision] = {}
         if dec_ids:
@@ -398,6 +410,7 @@ def activity(request: Request, limit: int = Query(50, ge=1, le=200)):
                 why["rules"] = d.rules_applied or []
             out.append({
                 "ts": fill.ts.isoformat() if fill.ts else None,
+                "account": order.account,
                 "symbol": order.symbol, "side": order.side, "qty": fill.qty,
                 "price": round(fill.price, 2), "value": round(fill.qty * fill.price, 2),
                 "fees": round(fill.fees, 2), "status": order.status,
@@ -407,7 +420,59 @@ def activity(request: Request, limit: int = Query(50, ge=1, le=200)):
                 "contributors": (d.contributors if d else {}) or {},
                 "why": why,
             })
-    return {"activity": out, "count": len(out)}
+    return {"activity": out, "count": len(out), "accounts": accounts,
+            "account": account}
+
+
+@router.get("/activity/outcomes")
+def activity_outcomes(request: Request, limit: int = Query(50, ge=1, le=100),
+                      account: str = Query("", max_length=24)):
+    """Closed round trips with outcome fields (plan §9.4): holding period,
+    realized P&L after fees, MFE/MAE, and the benchmark-relative return."""
+    if account and not _valid_symbol(account):
+        return {"error": "invalid account"}
+    from ats.services.dashboard.outcomes import closed_trades
+
+    trades = closed_trades(account=account or None, limit=limit)
+    return {"trades": trades, "count": len(trades)}
+
+
+@router.get("/activity/export.csv")
+def activity_export(request: Request, account: str = Query("", max_length=24),
+                    limit: int = Query(2000, ge=1, le=10000)):
+    """The trade logbook as CSV for offline analysis (plan §9.4)."""
+    if account and not _valid_symbol(account):
+        return {"error": "invalid account"}
+    import csv
+    import io
+
+    from fastapi.responses import PlainTextResponse
+
+    with session_scope() as s:
+        q = (
+            select(Fill, Order).join(Order, Fill.order_id == Order.id)
+            .order_by(Fill.id.desc()).limit(limit)
+        )
+        if account:
+            q = q.where(Order.account == account)
+        rows = s.execute(q).all()
+        buf = io.StringIO()
+        w = csv.writer(buf, lineterminator="\n")
+        w.writerow(["ts", "account", "symbol", "side", "qty", "price", "value",
+                    "fees", "slippage", "status", "order_id", "decision_id"])
+        for fill, order in rows:
+            w.writerow([
+                fill.ts.isoformat() if fill.ts else "", order.account,
+                order.symbol, order.side, fill.qty, round(fill.price, 2),
+                round(fill.qty * fill.price, 2), round(fill.fees, 2),
+                round(fill.slippage, 2), order.status, order.id,
+                order.decision_id or "",
+            ])
+    return PlainTextResponse(
+        buf.getvalue(), media_type="text/csv",
+        headers={"Content-Disposition":
+                 f"attachment; filename=ats_trades_{account or 'all'}.csv"},
+    )
 
 
 @router.get("/summary")

@@ -190,6 +190,7 @@ def mount_dashboard(app: FastAPI) -> None:
     app.add_api_route("/strategies", page("strategies.html", "strategies"), response_class=HTMLResponse)
     app.add_api_route("/league", page("league.html", "league"), response_class=HTMLResponse)
     app.add_api_route("/research", page("research.html", "research"), response_class=HTMLResponse)
+    app.add_api_route("/loops", page("loops.html", "loops"), response_class=HTMLResponse)
     app.add_api_route("/charts", page("charts.html", "charts"), response_class=HTMLResponse)
     app.add_api_route("/portfolio", page("portfolio.html", "portfolio"), response_class=HTMLResponse)
     app.add_api_route("/activity", page("activity.html", "activity"), response_class=HTMLResponse)
@@ -241,6 +242,80 @@ def mount_dashboard(app: FastAPI) -> None:
             "counters": counters,
             "window": "24h",
         }
+
+    @app.get("/api/loops")
+    def loops(request: Request):
+        """Three-panel state of the three loops (plan §10.2): what each loop
+        is doing right now, from the services that own the facts."""
+        from ats.core import state as _state
+        from ats.core.models import Order
+        from ats.services.research import hypotheses as _registry
+
+        orch = getattr(request.app.state, "orchestrator", None)
+
+        def svc(name):
+            return orch.get(name) if orch else None
+
+        def safe(obj, method, default=None):
+            try:
+                fn = getattr(obj, method, None)
+                return fn() if fn else default
+            except Exception:  # noqa: BLE001 — one sick service must not kill the page
+                return default
+
+        # --- fast loop: the protective membrane ---
+        with session_scope() as s:
+            in_flight = int(s.execute(
+                select(func.count(Order.id)).where(
+                    Order.status.in_(("STAGED", "SUBMITTED", "ACKED", "PARTIAL"))
+                )
+            ).scalar() or 0)
+        md = svc("market_data")
+        fast = {
+            "mode": _state.get_mode(),
+            "kill_switch": _state.is_killed(),
+            "orders_in_flight": in_flight,
+            "vetoes": safe(svc("event_risk"), "status", {}),
+            "reconciliation": safe(svc("reconcile"), "status", {}),
+            "feed": safe(md, "data_status", {}),
+            "watchdog": safe(svc("watchdog"), "status", {}),
+        }
+
+        # --- medium loop: the quant earner ---
+        strategies = svc("strategies")
+        live = safe(strategies, "live_state", {"summary": {}}) or {"summary": {}}
+        trader = svc("strategy_trader")
+        regime = svc("regime")
+        medium = {
+            "summary": live.get("summary", {}),
+            "regime": getattr(safe(regime, "current"), "label", None),
+            "consensus": safe(trader, "live_views", {}),
+            "committee_tilt": (_state.get_kv("research:committee_tilt") or {}).get("tilts") or {},
+            "alloc_weights": {
+                r["id"]: r.get("alloc_weight")
+                for r in live.get("strategies", []) if r.get("alloc_weight")
+            },
+        }
+
+        # --- slow loop: the research factory ---
+        research = svc("research")
+        try:
+            kanban_counts = {stage: len(rows)
+                             for stage, rows in _registry.by_stage().items()}
+        except Exception:  # noqa: BLE001
+            kanban_counts = {}
+        next_runs: dict[str, str] = {}
+        if orch is not None:
+            for job in getattr(orch.scheduler, "get_jobs", lambda: [])():
+                if job.id.startswith(("research_", "flows_")) and job.next_run_time:
+                    next_runs[job.id] = job.next_run_time.isoformat()
+        slow = {
+            "factory": safe(research, "status", {"enabled": False}),
+            "hypotheses": kanban_counts,
+            "flows": safe(svc("flows"), "status", {}),
+            "next_runs": next_runs,
+        }
+        return {"fast": fast, "medium": medium, "slow": slow}
 
     @app.get("/api/agents")
     def agents(request: Request):

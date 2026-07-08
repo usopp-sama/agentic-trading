@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Loops{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="card span12 reveal">
+    <h2>The three loops</h2>
+    <p class="sub">
+      Intelligence placed by timescale: the <b>fast loop</b> (seconds) is the only
+      path to orders and refuses when in doubt; the <b>medium loop</b> (daily) is
+      the deterministic quant earner; the <b>slow loop</b> (weekly/monthly) is the
+      LLM research factory that improves the core — and never touches a trade.
+    </p>
+  </div>
+
+  <div class="card span4 reveal">
+    <h3>⚡ Fast — the protective membrane</h3>
+    <div id="fastPanel"><div class="empty">Loading…</div></div>
+  </div>
+  <div class="card span4 reveal">
+    <h3>📈 Medium — the quant earner</h3>
+    <div id="mediumPanel"><div class="empty">Loading…</div></div>
+  </div>
+  <div class="card span4 reveal">
+    <h3>🔬 Slow — the research factory</h3>
+    <div id="slowPanel"><div class="empty">Loading…</div></div>
+  </div>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+(function () {
+  const A = window.ATS;
+
+  function row(label, value) {
+    return `<div class="row-between" style="padding:3px 0"><span class="muted">${label}</span><span>${value}</span></div>`;
+  }
+  function pill(text, cls) { return `<span class="pill ${cls}">${A.esc(String(text))}</span>`; }
+  function okPill(ok, yes, no) { return ok ? pill(yes || "OK", "green") : pill(no || "attention", "red"); }
+
+  function renderFast(f) {
+    const feed = f.feed || {};
+    const recon = (f.reconciliation || {}).last || {};
+    const vetoes = f.vetoes || {};
+    const manual = (vetoes.manual || {});
+    const nManual = (manual.global ? 1 : 0) + Object.keys(manual.symbols || {}).length;
+    const nSeverity = Object.keys(vetoes.severity || {}).length;
+    const flow = vetoes.flow || {};
+    const nFlow = Object.keys(flow.vetoes || {}).length;
+    const wd = f.watchdog || {};
+    document.getElementById("fastPanel").innerHTML =
+      row("Mode", pill(f.mode || "?", f.mode === "AUTO" ? "green" : "blue")) +
+      row("Kill switch", f.kill_switch ? pill("ENGAGED", "red") : pill("armed", "green")) +
+      row("Orders in flight", `<b>${f.orders_in_flight || 0}</b>`) +
+      row("Feed", feed.degraded ? pill(`degraded ${feed.live || 0}/${feed.total || 0}`, "red")
+                                : pill(`${feed.live || 0}/${feed.total || 0} live`, "green")) +
+      row("Watchdog", okPill(!wd.unhealthy, "healthy", "unhealthy")) +
+      row("Reconciliation", recon.ok === false ? pill("MISMATCH — halted", "red")
+        : recon.ok === true ? pill("clean", "green") : pill("no run yet", "gray")) +
+      row("Calendar vetoes", (vetoes.global_events || []).length + (vetoes.fo_expiry ? 1 : 0)) +
+      row("Severity vetoes", nSeverity) +
+      row("Manual vetoes", nManual) +
+      row(`Flow vetoes (${A.esc(flow.mode || "?")})`, nFlow);
+  }
+
+  function renderMedium(m) {
+    const sum = m.summary || {};
+    const consensus = m.consensus || {};
+    const names = Object.keys(consensus).sort((a, b) =>
+      Math.abs(consensus[b].net_score) - Math.abs(consensus[a].net_score)).slice(0, 6);
+    const chips = names.map((s) =>
+      `<span class="chip">${A.esc(s)} <b class="${consensus[s].net_score > 0 ? "pos" : "neg"}">${consensus[s].net_score.toFixed(2)}</b> <span class="muted">${consensus[s].voters}v</span></span>`
+    ).join(" ") || '<span class="muted">No consensus yet this session.</span>';
+    const tilts = Object.entries(m.committee_tilt || {}).map(([k, v]) =>
+      `<span class="chip">${A.esc(k)} <b>${(v * 100).toFixed(0)}%</b></span>`).join(" ");
+    const weights = Object.entries(m.alloc_weights || {}).sort((a, b) => b[1] - a[1]).slice(0, 6)
+      .map(([k, v]) => `<span class="chip">${A.esc(k)} ${(v * 100).toFixed(0)}%</span>`).join(" ");
+    document.getElementById("mediumPanel").innerHTML =
+      row("Regime", pill(m.regime || "unknown", "blue")) +
+      row("Sleeves trading", `${sum.paper || 0} paper / ${sum.total || 0}`) +
+      row("Live calls", sum.live_calls || 0) +
+      `<div style="margin-top:8px"><span class="muted">Consensus per symbol</span><div>${chips}</div></div>` +
+      (weights ? `<div style="margin-top:8px"><span class="muted">Sleeve weights</span><div>${weights}</div></div>` : "") +
+      (tilts ? `<div style="margin-top:8px"><span class="muted">Committee tilt active</span><div>${tilts}</div></div>` : "");
+  }
+
+  function renderSlow(s) {
+    const fac = s.factory || {};
+    const budget = fac.budget || {};
+    const runs = fac.last_runs || {};
+    const hyp = s.hypotheses || {};
+    const stages = ["PROPOSED", "SPECIFIED", "BACKTESTED", "SHADOW", "PAPER", "LIVE", "REJECTED"];
+    const hypChips = stages.filter((st) => hyp[st]).map((st) =>
+      `<span class="chip">${A.esc(st.toLowerCase())} <b>${hyp[st]}</b></span>`).join(" ") || '<span class="muted">Registry empty.</span>';
+    const nextRuns = Object.entries(s.next_runs || {}).map(([id, ts]) =>
+      row(id.replace(/^(research_|flows_)/, "$1").replace("_", " "), A.esc(ts.slice(0, 16).replace("T", " ")))).join("");
+    const lastWeekly = runs.strategy_researcher || runs.macro_analyst;
+    document.getElementById("slowPanel").innerHTML =
+      row("Factory", fac.enabled ? pill("enabled", "green") : pill("disabled", "gray")) +
+      row("LLM budget (month)", `₹${(budget.used_inr || 0).toFixed(0)} / ₹${(budget.budget_inr || 0).toFixed(0)} ` +
+          (budget.exhausted ? pill("EXHAUSTED", "red") : pill("within budget", "green"))) +
+      row("Last weekly pass", lastWeekly ? `${A.ago(lastWeekly)} ago` : "never") +
+      row("Nightly digest", runs.nightly_digest ? `${A.ago(runs.nightly_digest)} ago` : "never") +
+      `<div style="margin-top:8px"><span class="muted">Hypotheses <a href="/research">→ registry</a></span><div>${hypChips}</div></div>` +
+      (nextRuns ? `<div style="margin-top:8px"><span class="muted">Next scheduled runs</span>${nextRuns}</div>` : "");
+  }
+
+  function load() {
+    A.fetchJSON("/api/loops").then((d) => {
+      renderFast(d.fast || {});
+      renderMedium(d.medium || {});
+      renderSlow(d.slow || {});
+    }).catch(() => {});
+  }
+  setInterval(load, 10000);
+  load();
+})();
+</script>
+{% endblock %}
