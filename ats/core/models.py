@@ -441,6 +441,81 @@ class KnowledgeDirective(Base):
     updated_ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
+class Hypothesis(Base):
+    """One research hypothesis in the slow-loop registry (plan §3.1).
+
+    The backbone of the research factory: every trading idea — agent-proposed
+    or human — lives here with its proposer, evidence, exact rule, and gate
+    result. Nothing trades that did not walk this lifecycle:
+
+        PROPOSED → SPECIFIED → BACKTESTED → REJECTED | SHADOW → PAPER → LIVE
+
+    Agents are scored by hypothesis survival rate, not per-trade attribution.
+    """
+
+    __tablename__ = "hypotheses"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    updated_ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+    title: Mapped[str] = mapped_column(String(256))
+    agent: Mapped[str] = mapped_column(String(64), index=True)  # proposer (role id or "human")
+    thesis: Mapped[str] = mapped_column(Text, default="")       # the idea, plain words
+    evidence: Mapped[str] = mapped_column(Text, default="")     # sources/citations
+    rule: Mapped[str] = mapped_column(Text, default="")         # exact backtestable spec
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    universe: Mapped[list] = mapped_column(JSON, default=list)
+    stage: Mapped[str] = mapped_column(String(16), default="PROPOSED", index=True)
+    backtest: Mapped[dict] = mapped_column(JSON, default=dict)  # walk-forward gate result
+    strategy_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class HypothesisEvent(Base):
+    """Audit trail of hypothesis stage transitions (who moved it, and why)."""
+
+    __tablename__ = "hypothesis_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    hypothesis_id: Mapped[int] = mapped_column(ForeignKey("hypotheses.id"), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    from_stage: Mapped[str] = mapped_column(String(16), default="")
+    to_stage: Mapped[str] = mapped_column(String(16), default="")
+    actor: Mapped[str] = mapped_column(String(64), default="system")
+    note: Mapped[str] = mapped_column(Text, default="")
+
+
+class ResearchNote(Base):
+    """Output of a scheduled research-role pass (macro/fundamentals/risk/…).
+
+    Commentary and flags only — notes never touch orders. The strategy
+    researcher's outputs land in ``hypotheses`` instead.
+    """
+
+    __tablename__ = "research_notes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    role: Mapped[str] = mapped_column(String(64), index=True)
+    title: Mapped[str] = mapped_column(String(256), default="")
+    content: Mapped[str] = mapped_column(Text, default="")
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)  # risk_flags, parse info, model
+
+
+class AllocationRecommendation(Base):
+    """A monthly committee allocation recommendation awaiting human approval.
+
+    Tilts are bounded (±10% by config) and only nudge sleeve weights after
+    explicit approval on the dashboard; guardrails are never touched.
+    """
+
+    __tablename__ = "allocation_recommendations"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    rationale: Mapped[str] = mapped_column(Text, default="")
+    tilts: Mapped[dict] = mapped_column(JSON, default=dict)  # strategy_id -> tilt
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    actor: Mapped[str] = mapped_column(String(64), default="")
+    responded_ts: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class KvState(Base):
     """Small key/value table for runtime state (kill switch, mode, etc.)."""
 

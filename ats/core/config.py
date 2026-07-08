@@ -397,6 +397,18 @@ class Settings(BaseSettings):
     # calendar days; regime flips rebalance immediately regardless.
     core_alloc_rebalance_days: int = 7
 
+    # --- Slow loop: research factory (three-loop plan §3) ---
+    # Scheduled LLM research runs: Sat 10:00 IST weekly pass, first Sunday
+    # 10:30 IST monthly committee, nightly 20:00 IST LLM-free maintenance.
+    research_enabled: bool = True
+    # Hard monthly cap on autonomous LLM spend (estimated, INR). Autonomous
+    # research runs skip with an audit note once exhausted; manual dashboard
+    # triggers still work. 0 disables the cap.
+    llm_monthly_budget_inr: float = 500.0
+    # Committee recommendations may tilt sleeve weights at most this fraction
+    # (±) after human approval; guardrails are never touched.
+    committee_max_tilt: float = 0.10
+
     @property
     def is_real_money_active(self) -> bool:
         """Real orders may flow only when the gate is open AND mode is live."""

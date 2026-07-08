@@ -217,11 +217,22 @@ class StrategyService:
 
     def _reallocate(self) -> None:
         """Recompute sleeve capital weights on each completed day."""
+        settings = get_settings()
         returns = self._sleeves.returns_by_sleeve()
         sharpes = {sid: self._sleeves.rolling_sharpe(sid) for sid in returns}
         self._alloc_weights = allocate(
-            returns, sharpes, method=get_settings().sleeve_allocation_method
+            returns, sharpes, method=settings.sleeve_allocation_method
         )
+        # Approved committee recommendation (slow loop): bounded tilt applied
+        # mechanically at reallocation time — never mid-session, never orders.
+        from ats.core import state as _state
+        from ats.services.strategies.allocation import apply_committee_tilt
+
+        tilts = (_state.get_kv("research:committee_tilt") or {}).get("tilts") or {}
+        if tilts:
+            self._alloc_weights = apply_committee_tilt(
+                self._alloc_weights, tilts, settings.committee_max_tilt
+            )
         self._alloc_mult = conviction_multipliers(self._alloc_weights)
         with session_scope() as s:
             for sid, weight in self._alloc_weights.items():

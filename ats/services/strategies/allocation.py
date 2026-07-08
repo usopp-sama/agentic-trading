@@ -226,6 +226,31 @@ def allocate(
     return performance_tilt(weights, sharpe_by_sleeve or {}, floor=floor, cap=cap)
 
 
+def apply_committee_tilt(
+    weights: dict[str, float], tilts: dict[str, float], max_tilt: float = 0.10
+) -> dict[str, float]:
+    """Apply an approved committee recommendation as bounded weight tilts.
+
+    Each sleeve's weight is scaled by ``1 + tilt`` with tilt clamped to
+    ``±max_tilt``, then the set is renormalized to sum to 1 — so the
+    committee can nudge the mix by at most ±10% per sleeve and can never
+    add or remove capital, only shift emphasis. Empty tilts = no-op.
+    """
+    if not weights or not tilts:
+        return dict(weights)
+    tilted = {}
+    for sid, w in weights.items():
+        try:
+            t = float(tilts.get(sid, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            t = 0.0
+        tilted[sid] = max(0.0, w * (1.0 + max(-max_tilt, min(max_tilt, t))))
+    total = sum(tilted.values())
+    if total <= 0:
+        return dict(weights)
+    return {sid: round(w / total, 6) for sid, w in tilted.items()}
+
+
 def conviction_multipliers(weights: dict[str, float]) -> dict[str, float]:
     """Dampen-only multipliers: the top-weighted sleeve keeps 1.0."""
     if not weights:

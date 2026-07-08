@@ -40,6 +40,7 @@ _SERVICES = [
     ("ats.services.learning.service", "LearningService"),
     ("ats.services.metrics.service", "MetricsService"),
     ("ats.services.rules.service", "RulesService"),
+    ("ats.services.research.factory", "ResearchFactoryService"),
     ("ats.services.dashboard.service", "DashboardService"),
 ]
 

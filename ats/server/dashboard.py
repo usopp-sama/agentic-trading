@@ -189,6 +189,7 @@ def mount_dashboard(app: FastAPI) -> None:
     app.add_api_route("/opportunities", page("opportunities.html", "opportunities"), response_class=HTMLResponse)
     app.add_api_route("/strategies", page("strategies.html", "strategies"), response_class=HTMLResponse)
     app.add_api_route("/league", page("league.html", "league"), response_class=HTMLResponse)
+    app.add_api_route("/research", page("research.html", "research"), response_class=HTMLResponse)
     app.add_api_route("/charts", page("charts.html", "charts"), response_class=HTMLResponse)
     app.add_api_route("/portfolio", page("portfolio.html", "portfolio"), response_class=HTMLResponse)
     app.add_api_route("/activity", page("activity.html", "activity"), response_class=HTMLResponse)
