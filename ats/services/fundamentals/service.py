@@ -29,9 +29,26 @@ class FundamentalsService:
         self.provider = build_fundamentals_provider()
         self._md = None
         self._cache: dict[str, dict] = {}
+        self._itypes: dict[str, str] = {}
+
+    def _load_instrument_types(self) -> None:
+        """Cache instrument types so we never ask a data vendor for company
+        fundamentals on an index or a commodity future (they have none, and
+        the live vendor answers such lookups with a 401 + noisy stack)."""
+        from ats.core.models import Instrument
+
+        try:
+            with session_scope() as s:
+                self._itypes = {
+                    r.symbol: r.instrument_type
+                    for r in s.execute(select(Instrument)).scalars().all()
+                }
+        except Exception as exc:  # noqa: BLE001 - fall back to fetching all
+            log.warning("fundamentals_itypes_load_failed", extra={"error": str(exc)})
 
     async def start(self, ctx) -> None:
         self._md = ctx.orchestrator.get("market_data")
+        self._load_instrument_types()
         self.refresh_all()
         hours = get_settings().fundamentals_refresh_hours
         ctx.scheduler.add_job(
@@ -47,7 +64,15 @@ class FundamentalsService:
     def refresh_all(self) -> int:
         symbols = self._md.watchlist() if self._md is not None else []
         refreshed = 0
+        skipped = 0
         for symbol in symbols:
+            # Only equities have company fundamentals. Skip indices/ETFs/
+            # commodities up front (known type, non-EQ) so we never make a
+            # doomed vendor call. Unknown symbols fall through to the provider.
+            itype = self._itypes.get(symbol)
+            if itype is not None and itype != "EQ":
+                skipped += 1
+                continue
             try:
                 snap = self.provider.fetch(symbol)
             except Exception as exc:  # noqa: BLE001
@@ -58,7 +83,7 @@ class FundamentalsService:
             self._cache[symbol] = snap.as_dict()
             self._persist(snap)
             refreshed += 1
-        log.info("fundamentals_refreshed", extra={"symbols": refreshed})
+        log.info("fundamentals_refreshed", extra={"symbols": refreshed, "skipped": skipped})
         return refreshed
 
     @staticmethod

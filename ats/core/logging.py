@@ -119,8 +119,11 @@ def configure_logging(
             logging.getLogger("ats.logging").warning("file_logging_setup_failed")
 
     root.setLevel(level)
-    # Quiet noisy third-party loggers.
-    for noisy in ("uvicorn.access", "apscheduler", "httpx", "httpcore"):
+    # Quiet noisy third-party loggers. Even under ATS_DEBUG these are pure
+    # transport chatter (yfinance's cookie/crumb dance, its peewee cookie
+    # cache, HTTP internals) that floods the log and hides our own lines.
+    for noisy in ("uvicorn.access", "apscheduler", "httpx", "httpcore",
+                  "yfinance", "peewee", "urllib3", "curl_cffi"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
