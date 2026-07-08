@@ -516,6 +516,27 @@ class AllocationRecommendation(Base):
     responded_ts: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class FlowDaily(Base):
+    """One day of public flow data per symbol (delivery % + bulk deals).
+
+    Inputs to the pump-signature veto (hypothesis #1) and, later, the
+    institutional-flow hypothesis (#2). Collected nightly from free NSE
+    archives; missing days simply stay absent (the signature degrades to
+    delivery-unconfirmed rather than guessing).
+    """
+
+    __tablename__ = "flows_daily"
+    __table_args__ = (UniqueConstraint("symbol", "day", name="uq_flow_daily"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(64), index=True)
+    day: Mapped[date] = mapped_column(Date, index=True)
+    delivery_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bulk_buy_qty: Mapped[float] = mapped_column(Float, default=0.0)
+    bulk_sell_qty: Mapped[float] = mapped_column(Float, default=0.0)
+    deals: Mapped[int] = mapped_column(Integer, default=0)
+    source: Mapped[str] = mapped_column(String(16), default="nse")
+
+
 class KvState(Base):
     """Small key/value table for runtime state (kill switch, mode, etc.)."""
 

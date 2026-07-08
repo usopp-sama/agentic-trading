@@ -27,6 +27,7 @@ _SERVICES = [
     ("ats.services.strategies.service", "StrategyService"),
     ("ats.services.knowledge.service", "KnowledgeService"),
     ("ats.services.agents.service", "AgentService"),
+    ("ats.services.flows.service", "FlowsService"),
     ("ats.services.risk.event_calendar", "EventRiskService"),
     ("ats.services.risk.service", "RiskService"),
     ("ats.services.execution.service", "ExecutionService"),

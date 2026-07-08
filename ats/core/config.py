@@ -409,6 +409,17 @@ class Settings(BaseSettings):
     # (±) after human approval; guardrails are never touched.
     committee_max_tilt: float = 0.10
 
+    # --- Flow anomalies (plan §4 / WS-5): pump-signature veto -------------
+    # shadow = score + audit what WOULD be vetoed, block nothing (default —
+    # the evaluation hypothesis #1 needs); active = EventRisk enforces it on
+    # new entries; off = no scoring.
+    flows_enabled: bool = True
+    flows_veto_mode: str = "shadow"
+    flows_source: str = "nse"          # nse | none (no network)
+    flows_px_chg_5d: float = 0.10      # price leg: +10% over 5 sessions
+    flows_vol_z: float = 3.0           # volume leg: z > 3 in the last 5 sessions
+    flows_delivery_drop: float = 0.10  # delivery leg: last < 20d mean by 10%
+
     @property
     def is_real_money_active(self) -> bool:
         """Real orders may flow only when the gate is open AND mode is live."""

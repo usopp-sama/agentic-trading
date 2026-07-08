@@ -188,6 +188,12 @@ class EventRiskService:
             reasons.append("manual_global")
         if symbol in (manual.get("symbols") or {}):
             reasons.append("manual")
+        # Flow-anomaly veto (hypothesis #1): enforced only in active mode;
+        # shadow entries are visible in status() but never block.
+        if settings.flows_veto_mode == "active":
+            flow = (state.get_kv("veto:flow") or {}).get(symbol)
+            if flow and flow.get("day") == on.isoformat() and not flow.get("shadow"):
+                reasons.append("flow_anomaly")
         return reasons
 
     def status(self) -> dict:
@@ -203,4 +209,9 @@ class EventRiskService:
             "manual": manual,
             "severity": {s: d for s, d in severity.items()
                          if d == today.isoformat()},
+            "flow": {
+                "mode": get_settings().flows_veto_mode,
+                "vetoes": {s: v for s, v in (state.get_kv("veto:flow") or {}).items()
+                           if v.get("day") == today.isoformat()},
+            },
         }
