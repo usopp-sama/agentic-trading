@@ -160,6 +160,8 @@ td.r,th.r{text-align:right}
 .stack{display:flex;flex-direction:column;gap:10px}
 .big{font-size:30px;font-weight:800;letter-spacing:-.5px;font-family:var(--font-display)}
 .up{color:var(--green)} .down{color:var(--red)}
+/* generic signed-value cells (league standings, activity outcomes) */
+td.pos,.pos{color:var(--green)} td.neg,.neg{color:var(--red)}
 
 /* cursor-follow ambient glow — sits above the flat bg, behind all content */
 #cursorGlow{position:fixed;top:0;left:0;width:480px;height:480px;margin:-240px 0 0 -240px;border-radius:50%;

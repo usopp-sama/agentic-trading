@@ -295,6 +295,192 @@ rows, screener presets against fixture metrics. ~12 tests.
    bool = false` default false → the note is generated deterministically
    from threshold rules; the LLM version stays available for manual runs).
 
+## QA-9 — "Nightdesk" dashboard theme (full redesign, toggleable)
+
+The operator asked for a dashboard that is information-dense and *enjoyable
+to stare at* — a trading-desk-at-night aesthetic, toggleable alongside the
+existing Modern/Minecraft themes. The theme engine already supports exactly
+this (`ats/server/static/themes.js`): drop `/static/themes/<id>.css`
+(token + component overrides), register in `REGISTRY`, add one button in
+`base.html`'s `#segTheme`. **No template forks — a theme is CSS (plus an
+optional JS mount for ambient effects). If it breaks, the user toggles back.**
+
+### 9.1 Design concept
+
+**Nightdesk** — a Bloomberg-terminal-meets-modern-glass look: near-black
+blue, phosphor-mint data glow, monospace tabular numerals, hairline borders,
+dense rows, subtle CRT ambience. Information first; the glow is seasoning,
+never sauce.
+
+### 9.2 Design tokens (exact values; override `:root` vars under `[data-theme="nightdesk"]`)
+
+| Token | Dark (default) | Light variant ("Dayfloor") |
+|---|---|---|
+| `--bg` | `#05070b` | `#eef2f7` |
+| `--panel` / `--panel2` / `--elev` | `#0b101a` / `#111827` / `#151e2d` | `#ffffff` / `#e7edf5` / `#ffffff` |
+| `--border` | `#1c2940` | `#c9d6e6` |
+| `--text` / `--muted` | `#dbe7f4` / `#6b7d93` | `#16202e` / `#5c6c80` |
+| `--accent` (phosphor mint) | `#00e5a0` | `#0a9e74` |
+| `--accent2` (signal blue) | `#58a6ff` | `#2f6fd0` |
+| `--green` / `--red` | `#00e5a0` / `#ff5c7a` | `#0a9e74` / `#d13b5c` |
+| `--warn` | `#ffb454` | `#b97d1e` |
+
+Typography: UI text `"Segoe UI Variable", "Segoe UI", system-ui` — ships
+with Windows 11, zero downloads. **All numerals** (`td`, `.num`, pills with
+values, equity figures) in `"Cascadia Code", "Cascadia Mono", Consolas,
+monospace` with `font-variant-numeric: tabular-nums` — also ships with
+Win 11. **CSP-friendly: zero external fonts, zero CDNs** (LAN/offline rule).
+
+### 9.3 Signature elements (all CSS; each one line-itemed so Opus can check them off)
+
+1. **Backdrop ambience**: two fixed radial glows (mint top-left, blue
+   bottom-right, ≤4% opacity) + a 3px repeating scanline gradient at 2%
+   opacity. Pure CSS on `body::before/::after`; hidden when
+   `[data-motion="reduced"]` or in the light variant.
+2. **Glass header**: sticky, `backdrop-filter: blur(12px)`,
+   `rgba(5,8,12,.72)` — the nav floats over content when scrolling.
+3. **Cards**: 14px radius, hairline `--border`, a 1px top edge-light
+   (linear-gradient mint→transparent at 25% opacity), hover = border
+   brightens + `0 8px 30px rgba(0,0,0,.5)` lift. Card `h2/h3` get a 2px
+   left accent rail and 11px uppercase letter-spaced kicker styling.
+4. **Data tables**: header row 10.5px uppercase `letter-spacing:.08em`
+   muted; numeric cells mono + tabular; row hover tints
+   `color-mix(accent 6%)`; positive/negative values colored *and* carry a
+   faint background bar so P&L columns scan like a heatmap.
+5. **Pills**: outlined-glow style — transparent fill, 1px colored border,
+   soft outer glow (`box-shadow: 0 0 10px color-mix(...12%)`).
+6. **Buttons**: dark, accent border on hover; `.primary` = mint→blue
+   gradient with dark ink; the Kill button gets a red glow pulse
+   (2s ease, `@keyframes`, disabled under `[data-motion="reduced"]`).
+7. **Status dots** (`.wsdot`): glow halo when connected.
+8. **Scrollbars**: thin (8px) dark custom with accent-on-hover thumb.
+9. **League equity curves / sparklines**: the existing inline SVGs inherit
+   theme colors — verify polyline strokes read from `currentColor`/vars,
+   patch the 10-color palette in `league.html` only if contrast fails.
+10. **Focus/selection**: mint focus ring; mint 30% selection.
+
+Optional (separate commit, only if time allows): `nightdesk.js` using
+`ATSTheme.define('nightdesk', {mount, unmount})` for a number-flash effect —
+`.num` cells flash mint/red for 400ms on value change via a
+MutationObserver, capped at 60 updates/s, fully torn down in `unmount()` and
+inert under reduced motion. **CSS theme must not depend on it.**
+
+### 9.4 Per-page treatments (verify each renders correctly in both variants)
+
+- **Today**: becomes the "mission control" bento — cards read as tiles;
+  equity + day P&L numerals at 28px mono; movers panel (QA-7) slots here.
+- **League**: standings table is the hero — rank numerals oversized,
+  benchmark row pinned with a blue left rail, per-account sparkline column.
+- **Research**: kanban columns get stage-colored top rails; hypothesis cards
+  read as tickets (mono id, agent chip).
+- **Charts/Activity/News/System**: token inheritance does most of it; check
+  chart gridlines/candles against `--panel2` contrast and the activity
+  status pills against the new palette.
+- **Header (all pages)**: loop pills (fast/medium/slow from `/loops` state)
+  render as three glow dots + labels; keep the existing mode select + kill.
+
+### 9.5 Files touched + acceptance
+
+- `ats/server/static/themes/nightdesk.css` (new; ~350 lines, all selectors
+  prefixed `[data-theme="nightdesk"]`)
+- `ats/server/static/themes.js` — one REGISTRY line
+  (`nightdesk: {name:"Nightdesk", css:"/static/themes/nightdesk.css", variants:true}`)
+- `ats/server/templates/base.html` — one button in `#segTheme`
+- Optional: `ats/server/static/themes/nightdesk.js` (§9.3 note)
+
+Acceptance: toggle Modern↔Nightdesk↔Minecraft live with no reload artifacts;
+choice persists (localStorage — already handled by the engine); both
+variants legible (spot-check contrast ≥ 4.5:1 for body text, 3:1 for
+muted); `[data-motion="reduced"]` kills every animation/glow-pulse; zero
+external network requests (DevTools network tab clean on a hard reload);
+every existing page renders without layout breakage.
+
+## QA-10 — Running it all on the host laptop (Ryzen 5 5500U · 15.5 GB · Win 11)
+
+Everything runs on this one machine. The architecture is already shaped for
+it — **single Python process, asyncio + APScheduler, SQLite, in-memory
+bus** — so the main job is *not adding* heavy things, plus a few host
+settings. Opus: treat every rule here as a constraint on all QA workstreams.
+
+### 10.1 Memory budget (the scarce resource)
+
+| Consumer | Typical | Notes |
+|---|---|---|
+| Windows 11 + drivers/UI | ~4.5–5.5 GB | fixed cost |
+| ATS server process | 0.6–0.9 GB | pandas + 54-symbol history + services |
+| + FinBERT (torch, CPU) | +0.7–0.9 GB | the single biggest optional slug |
+| Browser tab (dashboard) | 0.3–0.8 GB | one tab, one machine |
+| **Headroom** | **~7 GB** | comfortable — no swap pressure expected |
+
+Rules that keep it that way:
+- **`workers=1` forever.** All state (bus, caches, league broker) is
+  in-process; a second uvicorn worker would double RAM *and* split the bus.
+  This is already the case (`ats/server/__main__.py`) — never "optimize" it.
+- **FinBERT is the lever.** `ATS_NLP_SENTIMENT_MODEL=vader` drops ~800 MB
+  instantly (VADER is lexical, no torch) at modest quality cost. Keep
+  `auto` by default; document vader as the low-RAM mode in `.env`.
+  Verify FinBERT loads lazily (first scored headline, not import time) —
+  if it loads at startup today, make it lazy in QA-7's commit.
+- **No new infra.** No Docker on this host (WSL2 VM reserves 1–2 GB), no
+  Redis, no Postgres, no browser automation. SQLite + memory bus stay.
+- **Analytics snapshots are rows, not caches**: QA-7 persists one JSON row
+  per symbol/day and reads it back — the dashboard never triggers
+  recomputation, and process RAM doesn't grow with history.
+- **DataFrames**: always via `market_data.get_history(limit=400)` (shared
+  LRU); never hold frames on `self` across cycles in new services.
+
+### 10.2 CPU (6 cores / 12 threads — plenty, if we keep spikes off-session)
+
+- The 60s poll + 24 strategies over ~54 symbols costs well under one core.
+  Keep new per-poll work (QA-4 movers/VWAP) O(watchlist) with no I/O.
+- Heavy passes are **scheduled off-hours by design** — keep it that way:
+  statements refresh Sun 18:00, flows 19:00, research nightly 20:00,
+  analytics close-pass 15:50. Never put statements/DCF work in the poll path.
+- Backtests (`scripts/run_backtests.py`) are the one true CPU burn: run them
+  manually or schedule ≥ 20:00 IST, and set `OPENBLAS_NUM_THREADS=4` /
+  `MKL_NUM_THREADS=4` in that script's env so BLAS doesn't oversubscribe
+  all 12 threads while the server polls.
+
+### 10.3 SQLite + disk
+
+- Add (if absent) on engine init: `PRAGMA journal_mode=WAL` and
+  `PRAGMA synchronous=NORMAL` — fewer write stalls with our many small
+  writers (bars, signals, snapshots, journal). One-line check in
+  `ats/core/db.py`.
+- Logs are already capped (10 MB × 10). `var/ats.db` growth is dominated by
+  `ohlcv` + `llm_calls` + `analytics_snapshots`; add a monthly retention
+  job later (out of scope here) — at current rates the DB stays < 1 GB for
+  months.
+- Exclude `var/` from Windows Defender real-time scanning (Settings →
+  Virus & threat → Exclusions): SQLite's write pattern triggers rescans and
+  costs real latency on every commit.
+
+### 10.4 Windows host checklist (the operator does these once)
+
+1. **Power: never sleep on AC.** The `Run time of job ... was missed by
+   1:53:38` warnings in the logs are literally the laptop sleeping.
+   Settings → System → Power: *Never* sleep when plugged in; lid-close =
+   do nothing (if it runs closed). USB selective suspend off is unnecessary.
+2. **Autostart**: Task Scheduler → new task, trigger *At log on*, action
+   `C:\Users\go4av\work\agentic-trading\.venv\Scripts\python.exe -m ats.server`,
+   start-in the repo dir, "run whether user is logged on" unchecked (keep
+   it simple), restart-on-failure ×3. (This is the Windows equivalent of
+   `deploy/ats.service`.)
+3. **Browser**: one pinned tab; Edge/Chrome sleeping-tabs whitelist for
+   `127.0.0.1:8000` so the WebSocket stays alive.
+4. Optional heads-up: Windows Update *active hours* set to market hours so
+   a 3 AM reboot doesn't kill a research night — autostart makes even that
+   self-healing.
+
+## QA-11 — Mobile (deferred, decided direction only)
+
+Native app: not now. The cheap 90% is a **PWA**: `manifest.json` + icon +
+a ~30-line service worker (cache-shell strategy), plus a responsive audit
+pass over the templates (they already carry the viewport meta). Result:
+"Add to Home Screen" on the phone, full-screen dashboard over LAN/VPN.
+≈ 0.5 day, schedule after QA-9 lands. Anything push-notification-shaped
+stays on the existing email/Telegram channels.
+
 ## Sequencing, effort, acceptance
 
 | Order | WS | Effort | Acceptance gate |
@@ -307,8 +493,13 @@ rows, screener presets against fixture metrics. ~12 tests.
 | 6 | QA-6 fair value | 1 d | rupee-exact fixture DCF; refuses thin data |
 | 7 | QA-7 service+UI | 2 d | /screener + badges live; snapshot survives restart; suite green |
 | 8 | QA-8 integration | 1 d | tech_confluence in registry as SPECIFIED w/ backtest attached; surprise% on events panel |
+| 9 | QA-9 Nightdesk theme | 1.5 d | §9.5 acceptance list, both variants, reduced-motion clean |
+| 10 | QA-11 PWA | 0.5 d | installable on phone; offline shell loads |
 
-Total ≈ 8 working days. Commit per row. Full pytest green at every commit
+QA-10 is an ops constraint set, not a build item — apply it throughout;
+its only code artifacts are the WAL pragma + FinBERT lazy-load check.
+
+Total ≈ 10 working days. Commit per row. Full pytest green at every commit
 (419 now; expect ~+70). Everything runs offline (synthetic source) except
 statement refresh, which degrades gracefully like fundamentals does today.
 

@@ -14,6 +14,7 @@
 (function () {
   const REGISTRY = {
     modern:    { name: "Modern",    variants: true },                                            // tokens live in app.css
+    nightdesk: { name: "Nightdesk", css: "/static/themes/nightdesk.css", variants: true },       // trading desk at 2 AM
     minecraft: { name: "Minecraft", css: "/static/themes/minecraft.css", js: "/static/themes/minecraft.js", variants: false },
   };
   const KEY = { theme: "ats-theme", variant: "ats-variant", motion: "ats-motion" };

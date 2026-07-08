@@ -1,0 +1,192 @@
+/* ============================================================
+   NIGHTDESK — a trading desk at 2 AM.
+   Near-black blue, phosphor-mint data glow, monospace tabular
+   numerals, hairline borders, CRT ambience. Information first;
+   the glow is seasoning, never sauce.
+
+   Loaded AFTER app.css by the theme engine; every rule is scoped
+   to [data-theme="nightdesk"], so toggling away fully restores
+   the other themes. Fonts are Windows-local (Segoe UI Variable,
+   Cascadia) — zero external requests, LAN/offline safe.
+   ============================================================ */
+
+/* ---------- tokens: dark (default) ---------- */
+[data-theme="nightdesk"]{
+  --bg:#05070b; --panel:#0b101a; --panel2:#111827; --elev:#151e2d;
+  --text:#dbe7f4; --muted:#6b7d93; --border:#1c2940;
+  --accent:#00e5a0; --accent2:#58a6ff; --accent-ink:#02120c;
+  --green:#00e5a0; --red:#ff5c7a; --amber:#ffb454; --blue:#58a6ff; --purple:#b18aff;
+  --radius:14px; --radius-sm:8px;
+  --font:"Segoe UI Variable Text","Segoe UI",system-ui,Roboto,Helvetica,Arial,sans-serif;
+  --font-display:"Segoe UI Variable Display","Segoe UI",system-ui,sans-serif;
+  --font-data:"Cascadia Code","Cascadia Mono",Consolas,ui-monospace,monospace;
+  --shadow:0 2px 4px rgba(0,0,0,.5),0 14px 40px rgba(0,0,0,.45);
+  --shadow-sm:0 1px 3px rgba(0,0,0,.45);
+  --glow:0 0 10px;
+  color-scheme:dark;
+}
+/* ---------- tokens: "Dayfloor" light variant ---------- */
+[data-theme="nightdesk"][data-variant="light"]{
+  --bg:#eef2f7; --panel:#ffffff; --panel2:#e7edf5; --elev:#ffffff;
+  --text:#16202e; --muted:#5c6c80; --border:#c9d6e6;
+  --accent:#0a9e74; --accent2:#2f6fd0; --accent-ink:#ffffff;
+  --green:#0a9e74; --red:#d13b5c; --amber:#b97d1e; --blue:#2f6fd0; --purple:#7c5cdb;
+  --shadow:0 1px 2px rgba(16,27,45,.08),0 12px 30px rgba(16,27,45,.10);
+  --shadow-sm:0 1px 2px rgba(16,27,45,.08);
+  color-scheme:light;
+}
+
+/* ---------- backdrop ambience: corner glows + scanlines ---------- */
+[data-theme="nightdesk"] body{position:relative}
+[data-theme="nightdesk"] body::before{
+  content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;
+  background:
+    radial-gradient(900px 600px at 8% -5%, rgba(0,229,160,.05), transparent 60%),
+    radial-gradient(900px 700px at 100% 105%, rgba(88,166,255,.05), transparent 60%);
+}
+[data-theme="nightdesk"] body::after{
+  content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;opacity:.5;
+  background:repeating-linear-gradient(0deg, rgba(255,255,255,.016) 0 1px, transparent 1px 3px);
+}
+[data-theme="nightdesk"][data-variant="light"] body::before,
+[data-theme="nightdesk"][data-variant="light"] body::after,
+[data-theme="nightdesk"][data-motion="reduced"] body::before,
+[data-theme="nightdesk"][data-motion="reduced"] body::after{display:none}
+
+/* ---------- glass header ---------- */
+[data-theme="nightdesk"] header{
+  background:rgba(5,8,12,.72);
+  backdrop-filter:blur(12px) saturate(1.2);
+  -webkit-backdrop-filter:blur(12px) saturate(1.2);
+  border-bottom:1px solid rgba(0,229,160,.14);
+}
+[data-theme="nightdesk"][data-variant="light"] header{
+  background:rgba(255,255,255,.72);border-bottom-color:var(--border)}
+[data-theme="nightdesk"] header h1{
+  color:var(--accent);
+  text-shadow:0 0 14px color-mix(in srgb,var(--accent) 55%,transparent);
+  font-family:var(--font-data);font-weight:700;letter-spacing:.5px}
+[data-theme="nightdesk"] nav a{border:1px solid transparent}
+[data-theme="nightdesk"] nav a.active{
+  background:color-mix(in srgb,var(--accent) 9%,transparent);
+  border-color:color-mix(in srgb,var(--accent) 35%,transparent);
+  box-shadow:var(--glow) color-mix(in srgb,var(--accent) 14%,transparent);
+  color:var(--accent)}
+
+/* ---------- cards: hairline + top edge-light + hover lift ---------- */
+[data-theme="nightdesk"] .card{
+  background:linear-gradient(180deg, color-mix(in srgb,var(--accent) 3%,var(--panel)) 0%, var(--panel) 42px);
+  box-shadow:inset 0 1px 0 color-mix(in srgb,var(--accent) 12%,transparent), var(--shadow-sm);
+}
+[data-theme="nightdesk"] .card:hover{
+  border-color:color-mix(in srgb,var(--accent) 30%,var(--border));
+  box-shadow:inset 0 1px 0 color-mix(in srgb,var(--accent) 16%,transparent), var(--shadow);
+}
+[data-theme="nightdesk"] .card h2,
+[data-theme="nightdesk"] .card h3{display:flex;align-items:center;gap:8px}
+[data-theme="nightdesk"] .card h2::before,
+[data-theme="nightdesk"] .card h3::before{
+  content:"";width:3px;height:12px;border-radius:2px;flex:0 0 auto;
+  background:linear-gradient(180deg,var(--accent),var(--accent2));
+  box-shadow:var(--glow) color-mix(in srgb,var(--accent) 30%,transparent)}
+[data-theme="nightdesk"] .card h3{font-size:12px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted)}
+
+/* ---------- the terminal read: mono tabular numerals ---------- */
+[data-theme="nightdesk"] td,
+[data-theme="nightdesk"] .kpi,
+[data-theme="nightdesk"] .big,
+[data-theme="nightdesk"] .metric .val,
+[data-theme="nightdesk"] .stage .count,
+[data-theme="nightdesk"] #hdrEquity{
+  font-family:var(--font-data);font-variant-numeric:tabular-nums}
+[data-theme="nightdesk"] td{font-size:12.5px}
+[data-theme="nightdesk"] th{letter-spacing:.09em;font-size:10.5px;color:color-mix(in srgb,var(--muted) 85%,transparent)}
+[data-theme="nightdesk"] tr:hover td{background:color-mix(in srgb,var(--accent) 5%,transparent)}
+[data-theme="nightdesk"] .kpi,
+[data-theme="nightdesk"] .big,
+[data-theme="nightdesk"] .metric .val{
+  text-shadow:0 0 18px color-mix(in srgb,var(--accent) 18%,transparent)}
+
+/* P&L cells scan like a heatmap: color + faint directional tint */
+[data-theme="nightdesk"] td.pos{color:var(--green);
+  background:linear-gradient(90deg, color-mix(in srgb,var(--green) 7%,transparent), transparent 70%)}
+[data-theme="nightdesk"] td.neg{color:var(--red);
+  background:linear-gradient(90deg, color-mix(in srgb,var(--red) 7%,transparent), transparent 70%)}
+
+/* ---------- pills: outlined phosphor glow ---------- */
+[data-theme="nightdesk"] .pill{background:transparent;border:1px solid var(--border);font-family:var(--font-data);font-size:11px}
+[data-theme="nightdesk"] .pill.green{border-color:color-mix(in srgb,var(--green) 45%,transparent);color:var(--green);box-shadow:var(--glow) color-mix(in srgb,var(--green) 12%,transparent)}
+[data-theme="nightdesk"] .pill.red{border-color:color-mix(in srgb,var(--red) 45%,transparent);color:var(--red);box-shadow:var(--glow) color-mix(in srgb,var(--red) 12%,transparent)}
+[data-theme="nightdesk"] .pill.amber{border-color:color-mix(in srgb,var(--amber) 45%,transparent);color:var(--amber)}
+[data-theme="nightdesk"] .pill.blue{border-color:color-mix(in srgb,var(--blue) 45%,transparent);color:var(--blue)}
+[data-theme="nightdesk"] .pill.accent{border-color:color-mix(in srgb,var(--accent) 50%,transparent);color:var(--accent);box-shadow:var(--glow) color-mix(in srgb,var(--accent) 14%,transparent);background:transparent}
+[data-theme="nightdesk"] .pill.gray{border-color:var(--border);color:var(--muted)}
+
+/* ---------- buttons ---------- */
+[data-theme="nightdesk"] button{background:#0d1420;border-color:var(--border)}
+[data-theme="nightdesk"][data-variant="light"] button{background:var(--panel2)}
+[data-theme="nightdesk"] button:hover{
+  border-color:color-mix(in srgb,var(--accent) 60%,transparent);
+  box-shadow:var(--glow) color-mix(in srgb,var(--accent) 14%,transparent)}
+[data-theme="nightdesk"] button.primary{
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  border-color:transparent;color:var(--accent-ink);font-weight:700}
+[data-theme="nightdesk"] .seg button{background:transparent}
+[data-theme="nightdesk"] .seg button.sel{
+  background:color-mix(in srgb,var(--accent) 14%,transparent);
+  color:var(--accent);box-shadow:none}
+
+/* the kill switch reads like hardware: slow red pulse while armed */
+@keyframes nd-armed{
+  0%,100%{box-shadow:0 0 0 0 rgba(255,92,122,0)}
+  50%{box-shadow:0 0 12px 1px rgba(255,92,122,.35)}
+}
+[data-theme="nightdesk"][data-motion="full"] #killBtn{animation:nd-armed 2.6s ease-in-out infinite}
+[data-theme="nightdesk"] #killBtn{border-color:color-mix(in srgb,var(--red) 55%,transparent);font-family:var(--font-data)}
+
+/* ---------- status dots + connection ---------- */
+[data-theme="nightdesk"] .wsdot.on{box-shadow:0 0 6px var(--green),0 0 16px color-mix(in srgb,var(--green) 55%,transparent)}
+[data-theme="nightdesk"] .sdot.positive{box-shadow:0 0 8px color-mix(in srgb,var(--green) 60%,transparent)}
+[data-theme="nightdesk"] .sdot.negative{box-shadow:0 0 8px color-mix(in srgb,var(--red) 60%,transparent)}
+
+/* ---------- chips / tags / code ---------- */
+[data-theme="nightdesk"] .chip{font-family:var(--font-data);border:1px solid var(--border);background:transparent}
+[data-theme="nightdesk"] .chip.pos{border-color:color-mix(in srgb,var(--green) 40%,transparent);background:transparent}
+[data-theme="nightdesk"] .chip.neg{border-color:color-mix(in srgb,var(--red) 40%,transparent);background:transparent}
+[data-theme="nightdesk"] .tag,[data-theme="nightdesk"] .tick{background:#0d1420;font-family:var(--font-data)}
+[data-theme="nightdesk"] .why-row code,[data-theme="nightdesk"] .llm-pre{background:#080d15;border-color:#16233a}
+
+/* ---------- toasts / popovers / reader ---------- */
+[data-theme="nightdesk"] .toast{background:rgba(11,16,26,.92);backdrop-filter:blur(8px)}
+[data-theme="nightdesk"] .popover,[data-theme="nightdesk"] .explain-pop{
+  background:rgba(11,16,26,.96);backdrop-filter:blur(10px);
+  border-color:color-mix(in srgb,var(--accent) 22%,var(--border))}
+[data-theme="nightdesk"][data-variant="light"] .toast,
+[data-theme="nightdesk"][data-variant="light"] .popover,
+[data-theme="nightdesk"][data-variant="light"] .explain-pop{background:rgba(255,255,255,.96)}
+
+/* ---------- pipeline stages ---------- */
+[data-theme="nightdesk"] .stage{background:#0d1420;border-color:var(--border)}
+[data-theme="nightdesk"][data-variant="light"] .stage{background:var(--panel2)}
+[data-theme="nightdesk"] .stage .count{color:var(--accent)}
+
+/* ---------- logs: pure terminal ---------- */
+[data-theme="nightdesk"] .logwrap,[data-theme="nightdesk"] .logline{font-family:var(--font-data)}
+[data-theme="nightdesk"] .logline:hover{background:color-mix(in srgb,var(--accent) 4%,transparent)}
+
+/* ---------- scrollbars: thin, dark, mint on hover ---------- */
+[data-theme="nightdesk"] ::-webkit-scrollbar{width:8px;height:8px}
+[data-theme="nightdesk"] ::-webkit-scrollbar-track{background:transparent}
+[data-theme="nightdesk"] ::-webkit-scrollbar-thumb{background:#1a2436;border-radius:6px}
+[data-theme="nightdesk"] ::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--accent) 40%,#1a2436)}
+[data-theme="nightdesk"] *{scrollbar-width:thin;scrollbar-color:#1a2436 transparent}
+
+/* ---------- details rows (activity/research) ---------- */
+[data-theme="nightdesk"] details.act{background:var(--panel)}
+[data-theme="nightdesk"] details.act>summary:hover{background:color-mix(in srgb,var(--accent) 4%,transparent)}
+[data-theme="nightdesk"] details.act[open]{border-color:color-mix(in srgb,var(--accent) 25%,var(--border))}
+
+/* ---------- banner + empty states ---------- */
+[data-theme="nightdesk"] .banner{background:#0d1420}
+[data-theme="nightdesk"][data-variant="light"] .banner{background:var(--panel)}
+[data-theme="nightdesk"] .empty{font-family:var(--font-data);letter-spacing:.03em}
