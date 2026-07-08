@@ -295,105 +295,152 @@ rows, screener presets against fixture metrics. ~12 tests.
    bool = false` default false → the note is generated deterministically
    from threshold rules; the LLM version stays available for manual runs).
 
-## QA-9 — "Nightdesk" dashboard theme (full redesign, toggleable)
+## QA-9 — "Control Room" dashboard (fundamental information architecture redesign)
 
-The operator asked for a dashboard that is information-dense and *enjoyable
-to stare at* — a trading-desk-at-night aesthetic, toggleable alongside the
-existing Modern/Minecraft themes. The theme engine already supports exactly
-this (`ats/server/static/themes.js`): drop `/static/themes/<id>.css`
-(token + component overrides), register in `REGISTRY`, add one button in
-`base.html`'s `#segTheme`. **No template forks — a theme is CSS (plus an
-optional JS mount for ambient effects). If it breaks, the user toggles back.**
+The operator wants something fundamentally different — not just colors, but a
+completely different way of consuming information. Instead of a grid-card
+page-based layout, **Control Room** is a **command-driven, real-time heatmap
++ drill-down architecture** inspired by mission control and Bloomberg Terminal.
 
-### 9.1 Design concept
+Think: centre stage is a **live heatmap** of all symbols (color = technical
+signal strength, size/pulse = activity), right rail scrolls active
+opportunities, top bar shows system state, bottom is a command palette. Click
+any symbol to drill into detail. It's intentionally *not* a better way to do
+the same things — it's a different way to *think* about the dashboard
+(data-first, action-oriented, minimal cognitive load).
 
-**Nightdesk** — a Bloomberg-terminal-meets-modern-glass look: near-black
-blue, phosphor-mint data glow, monospace tabular numerals, hairline borders,
-dense rows, subtle CRT ambience. Information first; the glow is seasoning,
-never sauce.
+### 9.1 Wireframe (the three-pane model)
 
-### 9.2 Design tokens (exact values; override `:root` vars under `[data-theme="nightdesk"]`)
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ ⚡ ATS  │ Today │ Control │ Research │ ...  [L/M/S] Eq:– Mode:PAPER Kill│
+├─────────────────────────────────────────────────────────────────────┤
+│                             ║                          ║             │
+│    ┌──────────────────────┐ ║ ┌────────────────────┐  ║    STATUS   │
+│    │                      │ ║ │  Active Signals    │  ║   ┌──────┐  │
+│    │  MARKET HEATMAP      │ ║ │  ─────────────────  │  ║   │Eq:   │  │
+│    │  (54 symbols color-  │ ║ │ INFY    +6  BUY    │  ║   │+2.8% │  │
+│    │   coded by tech      │ ║ │ TCS     +4  HOLD   │  ║   │Mode: │  │
+│    │   score, pulse on    │ ║ │ HDFCBANK -2  SELL  │  ║   │PAPER │  │
+│    │   recent signal)     │ ║ │ ...               │  ║   │Ready │  │
+│    │                      │ ║ │                    │  ║   └──────┘  │
+│    │ ▓▓▓▓▓ INFY      +6  │ ║ └────────────────────┘  ║             │
+│    │ ▓▓▓ TCS         +4  │ ║                         ║   NEXT REBAL │
+│    │ ▓▓ HDFCBANK    -2  │ ║    [scroll]             ║   in 2h 43m  │
+│    │ ▓ WIPRO        -4  │ ║                         ║             │
+│    │ ░░░ TATASTEEL  -8  │ ║                         ║   LLM MODE  │
+│    │                      │ ║                         ║   mock (✓)  │
+│    └──────────────────────┘ ║                         ║             │
+└────────────────────────────────────────────────────────────────────┘
+│ > [search symbol | type command]                                    │
+└────────────────────────────────────────────────────────────────────┘
+```
 
-| Token | Dark (default) | Light variant ("Dayfloor") |
-|---|---|---|
-| `--bg` | `#05070b` | `#eef2f7` |
-| `--panel` / `--panel2` / `--elev` | `#0b101a` / `#111827` / `#151e2d` | `#ffffff` / `#e7edf5` / `#ffffff` |
-| `--border` | `#1c2940` | `#c9d6e6` |
-| `--text` / `--muted` | `#dbe7f4` / `#6b7d93` | `#16202e` / `#5c6c80` |
-| `--accent` (phosphor mint) | `#00e5a0` | `#0a9e74` |
-| `--accent2` (signal blue) | `#58a6ff` | `#2f6fd0` |
-| `--green` / `--red` | `#00e5a0` / `#ff5c7a` | `#0a9e74` / `#d13b5c` |
-| `--warn` | `#ffb454` | `#b97d1e` |
+### 9.2 The three zones (all respond to live data every poll cycle)
 
-Typography: UI text `"Segoe UI Variable", "Segoe UI", system-ui` — ships
-with Windows 11, zero downloads. **All numerals** (`td`, `.num`, pills with
-values, equity figures) in `"Cascadia Code", "Cascadia Mono", Consolas,
-monospace` with `font-variant-numeric: tabular-nums` — also ships with
-Win 11. **CSP-friendly: zero external fonts, zero CDNs** (LAN/offline rule).
+**LEFT: Market Heatmap** — Read-only, background color-coded by technical_summary
+score:
+- Dark green (#00e5a0) = strong buy (+6)
+- Green = buy (+3–+5)
+- Gray = neutral (−2 to +2)
+- Red = sell (−5 to −3)
+- Dark red (#ff5c7a) = strong sell (≤−6)
 
-### 9.3 Signature elements (all CSS; each one line-itemed so Opus can check them off)
+Block height or glyph size = absolute momentum magnitude. Pulse or glow when
+there's a fresh signal (< 60s old). Hovering a symbol shows tooltip:
+`INFY | Score: +6 | Lev: R1 | Vol: 2.1M | Price: ₹2140`. Clicking drills
+to the symbol detail (overlay modal or right-pane swap).
 
-1. **Backdrop ambience**: two fixed radial glows (mint top-left, blue
-   bottom-right, ≤4% opacity) + a 3px repeating scanline gradient at 2%
-   opacity. Pure CSS on `body::before/::after`; hidden when
-   `[data-motion="reduced"]` or in the light variant.
-2. **Glass header**: sticky, `backdrop-filter: blur(12px)`,
-   `rgba(5,8,12,.72)` — the nav floats over content when scrolling.
-3. **Cards**: 14px radius, hairline `--border`, a 1px top edge-light
-   (linear-gradient mint→transparent at 25% opacity), hover = border
-   brightens + `0 8px 30px rgba(0,0,0,.5)` lift. Card `h2/h3` get a 2px
-   left accent rail and 11px uppercase letter-spaced kicker styling.
-4. **Data tables**: header row 10.5px uppercase `letter-spacing:.08em`
-   muted; numeric cells mono + tabular; row hover tints
-   `color-mix(accent 6%)`; positive/negative values colored *and* carry a
-   faint background bar so P&L columns scan like a heatmap.
-5. **Pills**: outlined-glow style — transparent fill, 1px colored border,
-   soft outer glow (`box-shadow: 0 0 10px color-mix(...12%)`).
-6. **Buttons**: dark, accent border on hover; `.primary` = mint→blue
-   gradient with dark ink; the Kill button gets a red glow pulse
-   (2s ease, `@keyframes`, disabled under `[data-motion="reduced"]`).
-7. **Status dots** (`.wsdot`): glow halo when connected.
-8. **Scrollbars**: thin (8px) dark custom with accent-on-hover thumb.
-9. **League equity curves / sparklines**: the existing inline SVGs inherit
-   theme colors — verify polyline strokes read from `currentColor`/vars,
-   patch the 10-color palette in `league.html` only if contrast fails.
-10. **Focus/selection**: mint focus ring; mint 30% selection.
+**CENTRE: Scrolling Ticker** — Live opportunities + movers filtered for the
+human (high conviction only, QA-7 min_score filter). Format per row:
+`SYMBOL | conviction | direction | driver | status`. Rows auto-update with
+animations (fade in new, fade out acted). Clicking a row drills its detail.
 
-Optional (separate commit, only if time allows): `nightdesk.js` using
-`ATSTheme.define('nightdesk', {mount, unmount})` for a number-flash effect —
-`.num` cells flash mint/red for 400ms on value change via a
-MutationObserver, capped at 60 updates/s, fully torn down in `unmount()` and
-inert under reduced motion. **CSS theme must not depend on it.**
+**RIGHT: Status Panel** — Four fixed stacks (equity, mode, next event, LLM):
+- **Equity**: huge mono numeral + %change, colored by direction
+- **Trading Mode**: SELECT dropdown (OFF/PAPER/APPROVAL/AUTO) + Kill button
+- **Next Rebalance**: clock countdown (from the medium loop)
+- **System Health**: loop status (3 glow dots), LLM mode (real/mock), DB size,
+  active connections
 
-### 9.4 Per-page treatments (verify each renders correctly in both variants)
+**BOTTOM: Command Palette** — `>` prompt, instant search (type `INFY` → jump
+to that symbol, type `dashboard` → swap panes, type `export` → trigger a
+report). Keep it minimal; most commands are symbol names (common case).
 
-- **Today**: becomes the "mission control" bento — cards read as tiles;
-  equity + day P&L numerals at 28px mono; movers panel (QA-7) slots here.
-- **League**: standings table is the hero — rank numerals oversized,
-  benchmark row pinned with a blue left rail, per-account sparkline column.
-- **Research**: kanban columns get stage-colored top rails; hypothesis cards
-  read as tickets (mono id, agent chip).
-- **Charts/Activity/News/System**: token inheritance does most of it; check
-  chart gridlines/candles against `--panel2` contrast and the activity
-  status pills against the new palette.
-- **Header (all pages)**: loop pills (fast/medium/slow from `/loops` state)
-  render as three glow dots + labels; keep the existing mode select + kill.
+### 9.3 Interactions (non-modal, low-latency feel)
 
-### 9.5 Files touched + acceptance
+- **Hover symbol block**: tooltip with key data (3s delay, max 200px wide,
+  no modal bloat).
+- **Click symbol**: detail drawer slides in from right (≤500px wide) showing
+  Charts + Fundamentals + Flow signature. Drawer is independent — left/centre
+  keep updating.
+- **Click opportunity row**: same drawer, pre-scrolled to that symbol.
+- **Mode/Kill**: existing buttons, keep visible (already in the right panel).
+- **Search/command**: ">" prompt in bottom bar, blur toggles it, ESC dismisses.
 
-- `ats/server/static/themes/nightdesk.css` (new; ~350 lines, all selectors
-  prefixed `[data-theme="nightdesk"]`)
-- `ats/server/static/themes.js` — one REGISTRY line
-  (`nightdesk: {name:"Nightdesk", css:"/static/themes/nightdesk.css", variants:true}`)
-- `ats/server/templates/base.html` — one button in `#segTheme`
-- Optional: `ats/server/static/themes/nightdesk.js` (§9.3 note)
+**No page navigation from this view** — everything is modal drawers or
+pane swaps. The existing "Today/Opportunities/Research/Charts" nav links
+stay in the header for deep dives; Control Room is the persistent monitoring
+view.
 
-Acceptance: toggle Modern↔Nightdesk↔Minecraft live with no reload artifacts;
-choice persists (localStorage — already handled by the engine); both
-variants legible (spot-check contrast ≥ 4.5:1 for body text, 3:1 for
-muted); `[data-motion="reduced"]` kills every animation/glow-pulse; zero
-external network requests (DevTools network tab clean on a hard reload);
-every existing page renders without layout breakage.
+### 9.4 Visual system (pure CSS + light HTML layer)
+
+Create `ats/server/templates/control_room.html`:
+- Single `.control-root` flex container (left/centre/right zones + bottom bar)
+- `.heatmap` SVG or CSS grid of colored blocks (54 symbols, responsive columns)
+- `.ticker` scrolling list (JavaScript updates, WebSocket feed)
+- `.status-panel` four boxes, live-updating via JS
+- `.command-palette` hidden input + results, reveal on focus or `>`
+
+CSS for the look (not a separate theme; baked into the new template):
+- **Backdrop**: matte dark (e.g., `#0a0f1a`) — less "glowy" than Nightdesk,
+  more business-like.
+- **Heatmap blocks**: 18×18px each, 2px gap, rounded corners. Background
+  color from score, semi-transparent (#80 alpha). On hover: brighten + 1px
+  accent border + tooltip (absolutely positioned).
+- **Ticker rows**: `height:28px`, tabular mono numerals, row hover = light
+  tint. Status pill right-aligned, auto-colored by stage (acted=green,
+  proposed=amber, etc.).
+- **Status numerals**: `font-size:36px`, `font-family: "Cascadia Code"`,
+  tabular, glowing text-shadow on the equity figure only (subtle, not garish).
+- **Command bar**: ` backdrop-filter: blur(10px)`, `position: sticky bottom: 0`,
+  `:focus` expands prompt width.
+
+### 9.5 File structure + acceptance
+
+- `ats/server/templates/control_room.html` (new; 200–250 lines, uses the
+  existing base.html for header/footer)
+- `ats/server/static/control_room.css` (new; ~300 lines, *not* a theme —
+  scoped CSS, plain classes, zero `:root` tokens)
+- `ats/server/static/control_room.js` (new; ~250 lines: WebSocket handler
+  for heatmap/ticker updates, command palette logic, drawer toggle)
+- `ats/server/dashboard.py`: add `@app.get("/control")` route returning the
+  new template (pass live market_data snapshot + opportunities)
+- `ats/server/templates/base.html`: add Control Room to nav (first, before
+  Today)
+
+Acceptance:
+- Page loads in <500ms without spinner (initial render from DB snapshots).
+- Heatmap updates per-poll (60s), no flicker, smooth color transitions.
+- Clicking a symbol shows its detail drawer with charts (reuse the existing
+  Charts page logic, but in a narrower modal).
+- Command palette responds to typing (< 50ms lag, server-side search via
+  symbol watchlist).
+- Responsive down to tablet (heatmap cols reflow, right panel becomes
+  scroll-able strip below centre on <768px).
+- All numerals are mono + tabular (the Cascadia covenant).
+- Works fully offline (synthetic source); API calls for `/api/dashboard`
+  (new summary endpoint) + `/api/movers` (QA-7) cache-local on first load.
+
+### 9.6 The intent
+
+This is not "a prettier dashboard." It's **a workflow redesign**: instead of
+"I click a menu, wait for page load, find the right card, read the data,"
+you get "glance at the heatmap, see coloured blocks shift, spot the high
+scores, click to drill." It's the trading equivalent of a weather radar —
+you read patterns at a glance, not data rows. It rewards long lookups (which
+you'll do for 24/7 runs) and makes boredom *harder* — colour + motion + real
+state = engagement.
 
 ## QA-10 — Running it all on the host laptop (Ryzen 5 5500U · 15.5 GB · Win 11)
 
@@ -493,13 +540,13 @@ stays on the existing email/Telegram channels.
 | 6 | QA-6 fair value | 1 d | rupee-exact fixture DCF; refuses thin data |
 | 7 | QA-7 service+UI | 2 d | /screener + badges live; snapshot survives restart; suite green |
 | 8 | QA-8 integration | 1 d | tech_confluence in registry as SPECIFIED w/ backtest attached; surprise% on events panel |
-| 9 | QA-9 Nightdesk theme | 1.5 d | §9.5 acceptance list, both variants, reduced-motion clean |
+| 9 | QA-9 Control Room | 2 d | heatmap renders live, ticker scrolls, command palette responsive, drawers drill into charts |
 | 10 | QA-11 PWA | 0.5 d | installable on phone; offline shell loads |
 
 QA-10 is an ops constraint set, not a build item — apply it throughout;
 its only code artifacts are the WAL pragma + FinBERT lazy-load check.
 
-Total ≈ 10 working days. Commit per row. Full pytest green at every commit
+Total ≈ 11 working days. Commit per row. Full pytest green at every commit
 (419 now; expect ~+70). Everything runs offline (synthetic source) except
 statement refresh, which degrades gracefully like fundamentals does today.
 
