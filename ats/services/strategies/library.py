@@ -566,6 +566,7 @@ def default_strategies() -> list[Strategy]:
 
 def default_universe_strategies() -> list[UniverseStrategy]:
     from ats.core.config import get_settings
+    from ats.services.strategies.core_allocation import CoreAllocation
     from ats.services.strategies.library_factors import (
         CointegrationPairs,
         LowVolBAB,
@@ -582,6 +583,10 @@ def default_universe_strategies() -> list[UniverseStrategy]:
     s = get_settings()
     top_n, rb = s.factor_sleeve_top_n, s.factor_sleeve_rebalance_days
     return [
+        # The core ballast (three-loop plan §2): regime-aware ETF allocation,
+        # weekly rebalance + immediate rebalance on regime flips. Paper from
+        # day 1 by design — it is the medium loop's primary earner.
+        CoreAllocation(rebalance_days=s.core_alloc_rebalance_days),
         # Original v1 universe sleeves (paper).
         PairsZScore(),
         FactorComposite(),

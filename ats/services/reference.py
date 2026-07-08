@@ -74,6 +74,7 @@ UNIVERSE: list[tuple[str, str, str, str]] = [
     ("SILVERBEES.NS", "Nippon Silver ETF", "Commodity ETF", "ETF"),
     ("GOLDBEES.NS", "Nippon Gold ETF", "Commodity ETF", "ETF"),
     ("NIFTYBEES.NS", "Nippon Nifty ETF", "Index ETF", "ETF"),
+    ("LIQUIDBEES.NS", "Nippon Liquid ETF", "Liquid ETF", "ETF"),
     # Underlying references for ETF NAV arbitrage. COMMODITY instruments are
     # price feeds only — the risk layer vetoes any order for them.
     ("SI=F", "COMEX Silver Futures", "Commodity Futures", "COMMODITY"),
@@ -83,6 +84,10 @@ UNIVERSE: list[tuple[str, str, str, str]] = [
 
 # Strategy registry: (id, name, type, status)
 STRATEGIES: list[tuple[str, str, str, str]] = [
+    # The core ballast (plan §2): regime-aware ETF allocation. Paper from
+    # day 1 by design — it is the medium loop's primary earner, not an alpha
+    # experiment awaiting a gate.
+    ("core_allocation", "Core Allocation (regime-aware ETF ballast)", "allocation", "paper"),
     ("sma_crossover", "SMA 20/50 Crossover", "trend", "paper"),
     ("mean_reversion", "Bollinger Mean Reversion", "mean_reversion", "paper"),
     ("volume_breakout", "Volume Breakout", "momentum", "shadow"),

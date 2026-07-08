@@ -393,6 +393,9 @@ class Settings(BaseSettings):
     # Volatility-target overlay
     vol_target_annual: float = 0.15
     vol_target_max: float = 0.60
+    # Core allocation sleeve (three-loop plan §2): weekly rebalance cadence in
+    # calendar days; regime flips rebalance immediately regardless.
+    core_alloc_rebalance_days: int = 7
 
     @property
     def is_real_money_active(self) -> bool:
