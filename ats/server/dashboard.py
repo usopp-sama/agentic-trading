@@ -246,7 +246,13 @@ def mount_dashboard(app: FastAPI) -> None:
 
     @app.get("/api/dashboard")
     def dashboard_snapshot(request: Request):
-        return build_snapshot(getattr(request.app.state, "orchestrator", None))
+        # Serve the cached snapshot (refreshed every 5s off-loop by the
+        # DashboardService) instead of recomputing per request (P0.4).
+        orch = getattr(request.app.state, "orchestrator", None)
+        svc = orch.get("dashboard") if orch else None
+        if svc is not None and hasattr(svc, "snapshot"):
+            return svc.snapshot()
+        return build_snapshot(orch)
 
     @app.get("/api/wallpapers")
     def wallpapers():

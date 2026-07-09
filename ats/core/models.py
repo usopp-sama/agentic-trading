@@ -77,7 +77,7 @@ class SentimentScore(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     ts: Mapped[datetime] = mapped_column(DateTime, index=True, default=_utcnow)
     symbol: Mapped[str] = mapped_column(String(64), index=True)
-    news_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    news_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     model: Mapped[str] = mapped_column(String(48), default="vader")
     label: Mapped[str] = mapped_column(String(16), default="neutral")
     score: Mapped[float] = mapped_column(Float, default=0.0)  # -1..1
