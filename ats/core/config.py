@@ -204,6 +204,11 @@ class Settings(BaseSettings):
     # --- Fundamentals ("synthetic" | "yfinance"; "auto" follows data_source) ---
     fundamentals_source: str = "auto"
     fundamentals_refresh_hours: int = 24
+    # Financial-statement lines (QA-5): the data unlock for Piotroski/Altman/DCF.
+    # Refreshed weekly off-hours (Sun 18:00 IST); "yfinance" | "none" (no network,
+    # rely on manual CSV import via scripts/import_statements.py).
+    statements_enabled: bool = True
+    statements_source: str = "yfinance"
 
     # --- Options chain (NIFTY IV monitor; "synthetic" | "nse"; "auto") ---
     option_chain_source: str = "auto"

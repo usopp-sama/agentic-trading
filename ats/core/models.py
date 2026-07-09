@@ -537,6 +537,48 @@ class FlowDaily(Base):
     source: Mapped[str] = mapped_column(String(16), default="nse")
 
 
+class FinancialStatements(Base):
+    """Parsed financial-statement lines per instrument (annual or quarterly).
+
+    The data unlock for Piotroski/Altman/DCF (``quant.analysis.quality`` and
+    the fair-value surface). One row per (symbol, period, as_of). Every metric
+    is nullable — a source that doesn't report a line leaves it ``None`` and
+    the consumer treats missing as missing (a missing Piotroski input is a
+    *failed* check, never a free point). Fed by the yfinance provider or a
+    manual/paid CSV export through the same ``source`` field.
+    """
+
+    __tablename__ = "financial_statements"
+    __table_args__ = (
+        UniqueConstraint("symbol", "period", "as_of", name="uq_financial_stmt"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(64), index=True)
+    period: Mapped[str] = mapped_column(String(16), default="annual")  # annual/quarterly
+    as_of: Mapped[date] = mapped_column(Date, index=True)
+    # income statement
+    revenue: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ebit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    net_income: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gross_margin: Mapped[float | None] = mapped_column(Float, nullable=True)  # decimal
+    tax_rate: Mapped[float | None] = mapped_column(Float, nullable=True)      # decimal
+    # cash flow
+    cfo: Mapped[float | None] = mapped_column(Float, nullable=True)           # operating CF
+    capex: Mapped[float | None] = mapped_column(Float, nullable=True)         # positive magnitude
+    dna: Mapped[float | None] = mapped_column(Float, nullable=True)           # depr & amort
+    dividends_paid: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # balance sheet
+    total_assets: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_liabilities: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_debt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    current_assets: Mapped[float | None] = mapped_column(Float, nullable=True)
+    current_liabilities: Mapped[float | None] = mapped_column(Float, nullable=True)
+    retained_earnings: Mapped[float | None] = mapped_column(Float, nullable=True)
+    net_debt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    shares_outstanding: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String(24), default="yfinance")
+
+
 class KvState(Base):
     """Small key/value table for runtime state (kill switch, mode, etc.)."""
 

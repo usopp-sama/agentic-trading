@@ -209,6 +209,20 @@ def mount_dashboard(app: FastAPI) -> None:
     def dashboard_snapshot(request: Request):
         return build_snapshot(getattr(request.app.state, "orchestrator", None))
 
+    @app.get("/api/wallpapers")
+    def wallpapers():
+        """List background images for the Liquid Glass theme. Drop any
+        .jpg/.png/.webp/.svg into ``static/wallpapers/`` and it appears in the
+        rotation — no restart, no manifest to edit. Ships a few SVG defaults."""
+        exts = {".jpg", ".jpeg", ".png", ".webp", ".avif", ".gif", ".svg"}
+        wp_dir = STATIC_DIR / "wallpapers"
+        files: list[str] = []
+        if wp_dir.exists():
+            for p in sorted(wp_dir.iterdir()):
+                if p.is_file() and p.suffix.lower() in exts:
+                    files.append(f"/static/wallpapers/{p.name}")
+        return {"wallpapers": files}
+
     @app.get("/api/pipeline")
     def pipeline(request: Request):
         hub = get_hub()
