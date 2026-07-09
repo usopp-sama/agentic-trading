@@ -147,12 +147,15 @@ class ScraperService:
             ).scalar_one_or_none()
             if exists:
                 return None
+            from ats.services.scraper.categorize import categorize
+
             item = NewsItem(
                 source=raw.get("source", ""),
                 url=url,
                 title=title,
                 body=body,
                 tickers=tickers,
+                category=categorize(title, body, tickers),  # P3 taxonomy
                 raw_hash=raw_hash,
             )
             s.add(item)

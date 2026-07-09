@@ -64,6 +64,11 @@ def init_db() -> None:
         for stmt in (
             "CREATE INDEX IF NOT EXISTS ix_sentiment_scores_news_id "
             "ON sentiment_scores (news_id)",
+            # P3: add the news category column to pre-existing DBs (ALTER is a
+            # no-op error when it already exists, swallowed below).
+            "ALTER TABLE news_items ADD COLUMN category VARCHAR(32) DEFAULT ''",
+            "CREATE INDEX IF NOT EXISTS ix_news_items_category "
+            "ON news_items (category)",
         ):
             try:
                 conn.execute(text(stmt))

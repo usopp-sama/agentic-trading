@@ -69,6 +69,7 @@ class NewsItem(Base):
     body: Mapped[str] = mapped_column(Text, default="")
     tickers: Mapped[list] = mapped_column(JSON, default=list)
     event_type: Mapped[str] = mapped_column(String(48), default="general")
+    category: Mapped[str] = mapped_column(String(32), default="", index=True)  # P3 taxonomy
     raw_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
 
 
