@@ -41,6 +41,7 @@ with no API keys, no database server, and no internet strictly required.
 - [Docker deployment](#docker-deployment)
 - [Bare-metal / Raspberry Pi (systemd)](#bare-metal--raspberry-pi-systemd)
 - [Path to real money](#path-to-real-money)
+- [The analytics engine](#the-analytics-engine)
 - [The quant toolkit](#the-quant-toolkit)
 - [Tests](#tests)
 
@@ -67,8 +68,16 @@ with no API keys, no database server, and no internet strictly required.
   update each SME's hit-rate, Brier score, and vote weight, promoting or demoting them.
 - **Governs itself.** Beyond the immutable guardrails, an adaptive rulebook can propose,
   shadow, and activate new conservative-only rules within meta-limits it cannot exceed.
-- **Shows you everything.** A multi-page dashboard with a live pipeline view, agent/SME
-  activity, news flow, graphical logs, toast notifications, and control buttons.
+- **Runs a deterministic analytics engine.** An investing.com-style layer computed on our
+  own data with our own math — a 12-check technical summary (Strong Buy…Strong Sell),
+  pivot/Fibonacci levels, candlestick patterns, VWAP + volume-confirmed movers, a
+  Piotroski/Altman/DCF fair-value surface, and multi-factor screens — all at zero LLM
+  cost. It shifts the medium loop's daily read off the LLM (the point: keep AI a
+  last-resort tool). See [The analytics engine](#the-analytics-engine).
+- **Shows you everything.** A multi-page dashboard — including a data-first **Control
+  Room** heatmap and a **Screener** — with a live pipeline view, agent/SME activity,
+  news flow, graphical logs, toast notifications, and control buttons. Installable as a
+  PWA over LAN/VPN.
 
 ---
 
@@ -144,15 +153,16 @@ decisions, and alerts.
 
 | Page | Route | What you see |
 |---|---|---|
-| **Overview** | `/` | Equity, real PnL, positions, watchlist news + sentiment, decisions, approvals, leaderboard |
-| **Pipeline** | `/pipeline` | Eight stage boxes that flash as events pass through; per-stage counters, throughput bars, newest activity |
-| **Agents** | `/agents` | Full SME roster (family, base weight, earned vote weight), live opinion stream, macro tilt, leaderboard |
-| **News** | `/news` | Live headline feed (watchlist hits highlighted), sentiment board, ingested/scored/hits counters |
-| **Logs** | `/logs` | Colour-coded event stream by pipeline stage, pause toggle, live topic-rate bars |
+| **Control Room** | `/control` | Data-first monitor: market heatmap (every symbol coloured by technical score), live opportunities ticker, status panel, command palette, click-to-drill drawer |
+| **Today** | `/` | Brief, top opportunities, portfolio, watchlist news + sentiment, decisions, volume-confirmed movers |
+| **Screener** | `/screener` | Multi-factor screens (value/quality/dividend/momentum) over the analytics table, CSV export |
+| **Opportunities / Strategies / League / Research / Loops** | `/opportunities` … | Ranked setups, sleeve roster + status, solo-account league, hypothesis registry, three-loop state |
+| **Charts / Portfolio / Activity / News / Experts / LLM / Logs / System** | `/charts` … | Candlesticks, blotter, per-order audit, news reader, SME console, LLM call log, event stream, pipeline + roster |
 
-Read/control APIs: `/api/health`, `/api/state`, `/api/dashboard`, `/api/pipeline`,
-`/api/agents`, `/api/logs`, `POST /api/mode`, `POST /api/kill`,
-`GET|POST /api/approvals/...`.
+Read/control APIs include `/api/health`, `/api/dashboard`, `/api/loops`, `/api/pipeline`,
+`/api/analytics`, `/api/analytics/{symbol}`, `/api/movers`, `/api/screener`,
+`/api/opportunities`, `POST /api/mode`, `POST /api/kill`. The dashboard installs as a
+**PWA** (`/manifest.webmanifest` + root-scoped `/sw.js`).
 
 ---
 
@@ -168,18 +178,25 @@ ats/                         # the agentic trading server
     ├── market_data/         # pluggable data sources (yfinance/synthetic/kite), polling
     ├── scraper/             # RSS/Marketaux collectors, dedup, ticker mapping
     ├── nlp/                 # sentiment (VADER/FinBERT), NER, vector store (RAG)
-    ├── strategies/          # SMA crossover, Bollinger mean-reversion, volume breakout
+    ├── strategies/          # sleeves incl. tech_confluence (analytics-engine sleeve)
+    ├── analytics/           # AnalyticsService: per-symbol snapshots, movers, screens
+    ├── fundamentals/        # ratios + financial statements + DCF fair-value surface
+    ├── flows/               # NSE delivery/bulk-deal collectors + pump-signature veto
     ├── knowledge/           # instrument profiles (company/ETF/fund knowledge base)
     ├── agents/              # SME registry + runtime, LLM client, tools, CIO aggregator
-    ├── risk/                # guardrails, adaptive-rule clamp, Kelly-capped allocator
+    ├── research/            # slow-loop hypothesis registry + research factory
+    ├── accounts/            # per-strategy solo accounts + the league
+    ├── risk/                # guardrails, event-risk veto (+ calendar surprise), allocator
     ├── execution/           # autonomy switch, paper broker, fees, portfolio, kite stub
     ├── learning/            # fill attribution + SME scoring/promotion
     ├── rules/               # self-governing rule engine (lifecycle + meta-limits)
     └── dashboard/           # snapshot builder + event→WebSocket bridge
-quant/                       # standalone analytics toolkit (indicators, valuation, backtest, risk)
-scripts/                     # harness.py, train_smes.py, smoke.py, demo.py, backup.sh
+quant/                       # standalone analytics toolkit (see The quant toolkit)
+│   └── analysis/            #   indicators, levels, patterns, summary, intraday,
+│                            #   quality, valuation, screener, regime
+scripts/                     # harness.py, run_backtests.py, import_statements.py, demo.py
 deploy/                      # Dockerfile, docker-compose.yml, ats.service, .env.example
-tests/                       # safety-critical unit tests + quant tests
+tests/                       # safety-critical unit tests + quant tests (498 passing)
 ```
 
 ---
@@ -434,6 +451,32 @@ confirmation.
 
 ---
 
+## The analytics engine
+
+A deterministic, investing.com-style analytics layer computed on our own data — the
+medium loop's daily read, at zero LLM cost. It is pure math in `quant/analysis/`
+(exact-assertion tested) wired up by `AnalyticsService`:
+
+- **Technical summary** — 12 independent checks (SMA 20/50/200, SMA/EMA crosses, RSI,
+  MACD, ADX direction, Bollinger %b, pivot, candlestick, volume trend) netted into a
+  Strong Buy…Strong Sell label. Every check is reported (name/vote/value) — never a
+  bare verdict.
+- **Levels & patterns** — classic pivots, Fibonacci retracements, and eight candlestick
+  patterns; the confluence of "strong summary at a support" powers the `tech_confluence`
+  sleeve.
+- **Fair value** — the existing two-stage DCF wired to real financial statements
+  (`FinancialStatements`), with a mandatory wacc × growth sensitivity grid and a
+  margin-of-safety verdict. It **refuses** (returns nothing) on thin data — a bad DCF is
+  worse than none. Piotroski F / Altman-Z / dividend-safety accompany it.
+- **Screens & movers** — value / quality / dividend / momentum presets over a per-symbol
+  metrics table; VWAP + volume-confirmed movers.
+
+Nothing here proposes a trade: analytics feed the dashboard, features into strategies,
+and pre-digested tables into the slow loop (so the weekly fundamentals pass runs
+**LLM-free** by default). Statement data comes from yfinance or a paid/manual CSV export
+(`python -m scripts.import_statements file.csv`) — never from scraping. Snapshots persist
+once per symbol/day (`AnalyticsSnapshot`), so the dashboard reads them back instantly.
+
 ## The quant toolkit
 
 `quant/` is a standalone, look-ahead-safe analytics library the server builds on:
@@ -459,7 +502,12 @@ python -m quant.projects.silverbees_nav --offline  # synthetic data
 | Module | What it does |
 |---|---|
 | `quant.data` | Fetch OHLCV via `yfinance`; persist to SQLite (`PriceStore`). Synthetic generator for offline use. |
-| `quant.analysis.indicators` | SMA, EMA, RSI (Wilder), MACD, Bollinger Bands, ATR, Donchian channels, annualized vol. |
+| `quant.analysis.indicators` | SMA, EMA, RSI (Wilder), MACD, Bollinger Bands, ATR, ADX, Donchian/Keltner, annualized vol. |
+| `quant.analysis.levels` | Classic (floor-trader) pivot points + Fibonacci retracements + nearest-level confluence. |
+| `quant.analysis.patterns` | Eight candlestick patterns (engulfing, hammer, star, doji, marubozu…) with signed strength. |
+| `quant.analysis.summary` | The 12-check "Technical Summary" composite → Strong Buy…Strong Sell with a full component breakdown. |
+| `quant.analysis.intraday` | VWAP + top movers with the volume-confirmation ("is the move real?") filter. |
+| `quant.analysis.quality` | Piotroski F-Score, dividend payout, Altman Z-Score + zone, dividend-safety screen. |
 | `quant.analysis.regime` | Market regime classifier: trend (up/down/range) x volatility (calm/normal/crisis) + style tilt matrix. |
 | `quant.analysis.valuation` | Two-stage DCF, dividend discount model, margin of safety, ETF NAV premium/discount, cost-of-carry futures price. |
 | `quant.analysis.screener` | Declarative, rule-based screener with ranking. |

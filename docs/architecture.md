@@ -19,7 +19,7 @@ dashboard.
 
 Three properties define the design:
 
-- **Modular monolith.** One process hosts ~18 fault-isolated services that
+- **Modular monolith.** One process hosts ~25 fault-isolated services that
   coordinate over an in-process event bus and a shared scheduler. Each service
   is registered independently and a failing/missing one is skipped, so the
   server always boots and the dashboard always comes up.
@@ -128,7 +128,7 @@ contracts, the event bus, and tamper-evident runtime state.
 | [config.py](../ats/core/config.py) | Pydantic-settings `Settings` (env prefix `ATS_`, `.env` at repo root, `extra="ignore"`); cached `get_settings()`; ensures `var/` exists. Secrets use `Field(repr=False)`. |
 | [logging.py](../ats/core/logging.py) | Structured JSON logging to stdout + optional rotating file; secret-key redaction and opaque-token scrubbing. |
 | [db.py](../ats/core/db.py) | SQLAlchemy 2.0 engine from `db_url`; `init_db()` creates tables; `session_scope()` transactional context manager. |
-| [models.py](../ats/core/models.py) | ORM tables: `Instrument`, `Ohlcv`, `NewsItem`, `SentimentScore`, `Signal`, `SmeOpinion`, `Decision`, `Order`, `Fill`, `Position`, `PnlDaily`, `Strategy`, `Rule`, `RuleVersion`, `Approval`, `AuditLog`, expert/thesis/directive tables, and `KvState`. |
+| [models.py](../ats/core/models.py) | ORM tables: `Instrument`, `Ohlcv`, `NewsItem`, `SentimentScore`, `Signal`, `SmeOpinion`, `Decision`, `Order`, `Fill`, `Position`, `PnlDaily`, `Strategy`, `Rule`, `RuleVersion`, `Approval`, `AuditLog`, expert/thesis/directive tables; the slow-loop registry (`Hypothesis`, `HypothesisEvent`, `ResearchNote`, `AllocationRecommendation`); the analytics layer (`Fundamental`, `FinancialStatements`, `AnalyticsSnapshot`, `FlowDaily`); and `KvState`. |
 | [schemas.py](../ats/core/schemas.py) | Pydantic in-memory contracts (not ORM): `Stance`, `Horizon`, `TradingMode` enums; `Opinion`, `SignalModel`, `ProposedPosition` with validators. |
 | [events.py](../ats/core/events.py) | `Topic` constants, `Event` dataclass, `EventBus` protocol, `InMemoryEventBus` (asyncio), `RedisStreamBus` (optional), and `build_event_bus()`. |
 | [state.py](../ats/core/state.py) | Runtime KV store, kill switch, trading-mode flag, real-money gate, and the hash-chained audit log. |
@@ -219,6 +219,11 @@ sequenceDiagram
 | News poll | 300s | `news_poll_interval_s` |
 | Option-chain poll | configurable | `option_chain_interval_s` |
 | Dashboard snapshot | 5s | (fixed in dashboard service) |
+| Analytics close pass | 15:50 IST cron (+ on boot) | — |
+| Analytics poll (movers/VWAP) | 60s | — |
+| Statements refresh | Sun 18:00 IST cron | `statements_source` |
+| Flows collect + veto | 19:00 IST cron | `flows_*` |
+| Research weekly / monthly / nightly | Sat 10:00 / 1st-Sun 10:30 / 20:00 IST | `research_enabled` |
 | Daily equity / digest / metrics | NSE close cron | — |
 
 Per-symbol SME runs and strategy evaluation are **event-driven** (off
@@ -382,7 +387,34 @@ as `Topic.NEWS`.
 Pluggable providers (`SyntheticFundamentals`, `YFinanceFundamentals`) producing a
 `FundamentalSnapshot` (P/E, P/B, ROE, D/E, margins, yield, market cap). No bus
 events — a pure oracle (`get`, `all_latest`) consumed by the factor/value
-strategies and by SME context.
+strategies and by SME context. Non-EQ instruments (indices/ETFs/commodities) are
+skipped up front via a cached instrument-type map, so no doomed vendor call is made.
+
+Also owns the **financial-statements layer** (QA-5): a weekly, off-hours
+(Sun 18:00 IST) refresh persists `FinancialStatements` rows (income/balance/cash-
+flow lines) from yfinance or a paid/manual CSV export
+([statements.py](../ats/services/fundamentals/statements.py),
+[import_csv.py](../ats/services/fundamentals/import_csv.py), and
+`scripts/import_statements.py`). Those lines feed the **fair-value surface**
+([fair_value.py](../ats/services/fundamentals/fair_value.py)): the two-stage DCF
+wired to real inputs with a wacc × growth sensitivity grid and a margin-of-safety
+verdict, refusing on thin data rather than guessing.
+
+### analytics ([ats/services/analytics/](../ats/services/analytics/))
+
+The deterministic analytics engine (QA-7). A **close pass** (15:50 IST + on boot,
+from stored history — no boot network) computes a full per-symbol snapshot —
+technical summary (`quant.analysis.summary`), pivot/Fibonacci levels
+(`quant.analysis.levels`), candlestick patterns (`quant.analysis.patterns`), fair
+value, and screener metrics — and persists one `AnalyticsSnapshot` row per
+(symbol, day) so the dashboard reads results back without recomputation. A **poll
+pass** (1 min, in-memory) recomputes VWAP + volume-confirmed movers
+(`quant.analysis.intraday`). Oracle methods `get`, `table`, `movers`, `screener`
+back `/api/analytics*`, `/api/movers`, `/api/screener`, the Control Room heatmap,
+and the Screener page. All heavy math is the pure `quant.analysis` modules; the
+service only wires data in and persists results out, and **never proposes a
+trade** — analytics feed pages, strategy features, and the slow loop's
+pre-digested tables.
 
 ### options_data ([ats/services/options_data/](../ats/services/options_data/))
 
@@ -436,14 +468,18 @@ flowchart TB
   `library_trend_mr.py`, `library_events.py`, `library_factors.py`): per-symbol
   (`sma_crossover`, `mean_reversion`, `volume_breakout`, `donchian_trend`,
   `rsi2_reversion`, `ts_momentum`, plus 52-week/MACD-ADX/OU-Keltner and
-  event/sentiment/seasonal strategies) and universe (`pairs_zscore`,
-  `factor_composite`, `nav_premium`, cross-sectional/dual momentum, value,
-  quality, size, low-vol, cointegration pairs).
+  event/sentiment/seasonal strategies, plus `tech_confluence` — the analytics-
+  engine sleeve that buys a strong technical-summary at a pivot/fib support) and
+  universe (`pairs_zscore`, `factor_composite`, `nav_premium`, cross-sectional/
+  dual momentum, value, quality, size, low-vol, cointegration pairs).
 - **Lifecycle**: each strategy has a DB status — `paper`, `shadow`, or
-  `paused`. Shadow strategies still compute and persist signals but **do not
-  publish** `Topic.SIGNAL`. Promotion from shadow to paper is gated by the
+  `paused`. Shadow strategies still compute and publish signals, but marked
+  `shadow: true`: the consensus trader ignores them for the main book while the
+  league runs each one's **solo account** (so it earns a real, out-of-sample
+  track record with zero risk). Promotion from shadow to paper is gated by the
   backtest harness ([backtest.py](../ats/services/strategies/backtest.py)) using
-  `quant.backtest.validation`.
+  `quant.backtest.validation`; strategies are also registered as `Hypothesis`
+  rows so they walk the same lifecycle audit trail.
 - **Service** ([service.py](../ats/services/strategies/service.py)): on each
   `BAR` it marks sleeves to market, runs per-symbol strategies, and on the last
   watchlist symbol runs universe strategies. Each signal is dampened by the
