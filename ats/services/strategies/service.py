@@ -19,6 +19,7 @@ flooding the DB on every poll.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime
 
 import pandas as pd
@@ -94,19 +95,15 @@ class StrategyService:
         # 1) Sleeves first: today's return belongs to yesterday's holdings.
         await self._mark_sleeves(symbol, df)
 
-        # 2) Per-symbol strategies.
-        for strat in self._strategies:
-            status = self._status.get(strat.id)
-            if status == "paused":
-                continue
-            try:
-                sig = strat.evaluate(symbol, df)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("strategy_error", extra={"strategy": strat.id, "symbol": symbol, "error": str(exc)})
-                continue
-            if sig is None:
-                continue
-            await self._handle_signal(sig, strat.style, shadow=(status == "shadow"))
+        # 2) Per-symbol strategies. Evaluation is pure pandas (no bus/DB/await),
+        # so the whole burst runs in ONE worker thread and we publish the
+        # results back on the loop — the loop stays free during the CPU work
+        # (P0.3: ~12 strategies x N symbols per cycle used to block it).
+        active = [(s, self._status.get(s.id) == "shadow")
+                  for s in self._strategies if self._status.get(s.id) != "paused"]
+        results = await asyncio.to_thread(self._evaluate_symbol, symbol, df, active)
+        for style, shadow, sig in results:
+            await self._handle_signal(sig, style, shadow=shadow)
 
         # 3) Universe strategies, once per poll cycle (on the last symbol's
         # bar, when every history in the cycle is fresh).
@@ -114,11 +111,34 @@ class StrategyService:
         if watchlist and symbol == watchlist[-1]:
             await self._run_universe_strategies(watchlist)
 
-    async def _run_universe_strategies(self, watchlist: list[str]) -> None:
-        for strat in self._universe_strategies:
-            status = self._status.get(strat.id)
-            if status == "paused":
+    def _evaluate_symbol(self, symbol: str, df: pd.DataFrame, active: list) -> list:
+        """Pure-pandas evaluation of every active per-symbol strategy; returns
+        ``(style, shadow, signal)`` tuples. Runs in a worker thread."""
+        out = []
+        for strat, shadow in active:
+            try:
+                sig = strat.evaluate(symbol, df)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("strategy_error", extra={"strategy": strat.id, "symbol": symbol, "error": str(exc)})
                 continue
+            if sig is not None:
+                out.append((strat.style, shadow, sig))
+        return out
+
+    async def _run_universe_strategies(self, watchlist: list[str]) -> None:
+        # Cross-sectional/ranking evaluation is the heaviest CPU of the cycle
+        # (factor ranks, cointegration). Off the loop, results back on it (P0.3).
+        active = [(s, self._status.get(s.id) == "shadow")
+                  for s in self._universe_strategies if self._status.get(s.id) != "paused"]
+        results = await asyncio.to_thread(self._evaluate_universe, active, watchlist)
+        for style, shadow, sig in results:
+            await self._handle_signal(sig, style, shadow=shadow)
+
+    def _evaluate_universe(self, active: list, watchlist: list[str]) -> list:
+        """Build each universe strategy's history and evaluate it; returns
+        ``(style, shadow, signal)`` tuples. Runs in a worker thread."""
+        out = []
+        for strat, shadow in active:
             needed = strat.symbols() or watchlist
             history: dict[str, pd.DataFrame] = {}
             for sym in needed:
@@ -131,7 +151,8 @@ class StrategyService:
                 log.warning("strategy_error", extra={"strategy": strat.id, "error": str(exc)})
                 continue
             for sig in signals:
-                await self._handle_signal(sig, strat.style, shadow=(status == "shadow"))
+                out.append((strat.style, shadow, sig))
+        return out
 
     async def _handle_signal(
         self, sig: SignalModel, style: str, shadow: bool = False
