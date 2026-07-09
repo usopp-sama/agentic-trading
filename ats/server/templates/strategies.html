@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Strategies{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="card span12 reveal">
+    <h2>Trading strategies in action</h2>
+    <p class="sub">
+      The quant strategies that scan the universe every poll cycle. A
+      <span class="pill green">paper</span> strategy can actually trade — when a
+      consensus of the paper strategies leans bullish on a name, it places a paper
+      order through the same Risk → Execution checks as everything else (no LLM cost).
+      A <span class="pill gray">shadow</span> strategy is recorded for its track
+      record but takes no capital until promoted.
+    </p>
+    <div class="llm-controls">
+      <label class="chk"><input type="checkbox" id="fAuto" checked> Auto-refresh</label>
+      <button id="fRefresh">Refresh</button>
+      <span class="spacer"></span>
+      <span class="muted" id="stratStats"></span>
+    </div>
+  </div>
+
+  <div class="card span12 reveal">
+    <h3>Roster &amp; live calls</h3>
+    <div id="rosterList"><div class="empty">Loading strategies…</div></div>
+  </div>
+
+  <div class="card span12 reveal">
+    <h3>What the strategies actually traded</h3>
+    <p class="sub">Orders driven by the strategy consensus (newest first), with the votes behind each.</p>
+    <div id="tradeList"><div class="empty">No strategy-driven orders yet — they fire on signals during market hours.</div></div>
+  </div>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+(function () {
+  const A = window.ATS;
+
+  function statusPill(s, tradeable) {
+    const c = tradeable ? "green" : (s === "shadow" ? "gray" : "accent");
+    return `<span class="pill ${c}">${A.esc(s)}</span>`;
+  }
+  function stancePill(st) {
+    const bull = st === "buy" || st === "strong_buy";
+    return `<span class="pill ${bull ? "green" : "red"}">${A.esc(st.replace("_", " "))}</span>`;
+  }
+  function num(x, d = 2) { return (x === null || x === undefined) ? "–" : Number(x).toFixed(d); }
+
+  let lastSig = null;
+
+  function sigOf(d) {
+    const r = (d.strategies || []).map((s) => `${s.id}:${s.status}:${s.n_signals}`).join(",");
+    const t = (d.trades || []).map((x) => `${x.ts}:${x.symbol}:${x.status}`).join(",");
+    return JSON.stringify([r, t, d.autotrade_enabled]);
+  }
+
+  function renderRoster(d) {
+    const el = document.getElementById("rosterList");
+    const items = d.strategies || [];
+    if (!items.length) { el.innerHTML = '<div class="empty">No strategies registered.</div>'; return; }
+
+    const openIds = new Set(
+      Array.from(el.querySelectorAll("details.act[open]")).map((n) => n.dataset.key)
+    );
+    const hadOpen = openIds.size > 0;
+
+    el.innerHTML = items.map((s) => {
+      const calls = (s.signals || []).map((g) =>
+        `<span class="chip">${A.esc(g.symbol)} ${stancePill(g.stance)} <span class="muted">${num(g.conviction)}</span></span>`
+      ).join(" ");
+      const open = hadOpen ? openIds.has(s.id) : (s.n_signals > 0);
+      const sharpe = s.sharpe === null || s.sharpe === undefined ? "" :
+        `<span class="muted" title="rolling sleeve Sharpe">Sharpe ${num(s.sharpe)}</span>`;
+      const alloc = (s.alloc_weight === null || s.alloc_weight === undefined) ? "" :
+        `<span class="muted" title="capital allocation weight">alloc ${(s.alloc_weight * 100).toFixed(0)}%</span>`;
+      const selTitle = { scanner: "evaluates every watchlist name independently",
+                         ranker: "ranks the whole universe, picks top/bottom N",
+                         specialist: "trades a fixed instrument list" }[s.selection] || "";
+      const sel = s.selection ? `<span class="pill gray" title="${selTitle}">${A.esc(s.selection)}</span>` : "";
+      const league = s.league_account ?
+        `<a class="pill blue" href="/league" title="own ₹1L account in the strategy league">${A.esc(s.league_account)}</a>` : "";
+      const universe = (s.instruments && s.instruments.length)
+        ? `<div class="muted" style="margin-top:4px">Allowed instruments: ${s.instruments.map(A.esc).join(", ")}</div>`
+        : `<div class="muted" style="margin-top:4px">Universe: ${s.selection === "ranker" ? "whole watchlist, ranked" : "whole watchlist, scanned per symbol"}</div>`;
+      return `<details class="act" data-key="${A.esc(s.id)}" ${open ? "open" : ""}>
+        <summary>
+          ${statusPill(s.status, s.tradeable)}
+          <b>${A.esc(s.name)}</b>
+          <span class="muted">${A.esc(s.type)}</span>
+          ${sel} ${league}
+          <span class="spacer"></span>
+          ${sharpe} ${alloc}
+          <span class="pill ${s.n_signals ? "blue" : "gray"}">${s.n_signals} live call${s.n_signals === 1 ? "" : "s"}</span>
+        </summary>
+        <div class="act-body">
+          ${calls || '<span class="muted">No actionable signal right now (neutral / waiting for setup).</span>'}
+          ${universe}
+        </div>
+      </details>`;
+    }).join("");
+  }
+
+  function renderTrades(d) {
+    const el = document.getElementById("tradeList");
+    const items = d.trades || [];
+    if (!items.length) {
+      el.innerHTML = '<div class="empty">No strategy-driven orders yet — they fire on signals during market hours.</div>';
+      return;
+    }
+    el.innerHTML = items.map((t) => {
+      const votes = (t.strategies || []).map((v) =>
+        `<span class="chip">${A.esc(v.strategy)} ${stancePill(v.stance)} <span class="muted">${num(v.conviction)}</span></span>`
+      ).join(" ");
+      const blocked = t.status !== "approved";
+      const actC = t.action === "BUY" ? "green" : "red";
+      return `<details class="act">
+        <summary>
+          <span class="pill ${actC}">${A.esc(t.action)} ${t.qty}</span>
+          <b>${A.esc(t.symbol)}</b>
+          <span class="pill ${blocked ? "gray" : "blue"}">${A.esc(t.status)}</span>
+          <span class="muted">net ${num(t.net_score)} · ${t.voters || 0} voters</span>
+          <span class="spacer"></span>
+          <span class="muted">${A.ago(t.ts)} ago</span>
+        </summary>
+        <div class="act-body">
+          <p class="rationale">${A.esc(t.rationale || "")}</p>
+          ${votes ? `<div>${votes}</div>` : ""}
+          ${(t.rules_applied || []).length ? `<p class="sub">Risk rules applied: ${A.esc((t.rules_applied || []).join(", "))}</p>` : ""}
+        </div>
+      </details>`;
+    }).join("");
+  }
+
+  function render(d) {
+    const sum = d.summary || {};
+    document.getElementById("stratStats").textContent =
+      `${sum.total || 0} strategies · ${sum.paper || 0} trading (paper) · ${sum.shadow || 0} shadow · ` +
+      `${sum.live_calls || 0} live calls · auto-trade ${d.autotrade_enabled ? "ON" : "OFF"}`;
+
+    const sig = sigOf(d);
+    if (sig === lastSig) return;
+    lastSig = sig;
+    renderRoster(d);
+    renderTrades(d);
+  }
+
+  function load() { A.fetchJSON("/api/strategies").then(render).catch(() => {}); }
+  function reload() { lastSig = null; load(); }
+
+  document.getElementById("fRefresh").addEventListener("click", reload);
+  setInterval(() => { if (document.getElementById("fAuto").checked) load(); }, 5000);
+  A.on("snapshot", () => { if (document.getElementById("fAuto").checked) load(); });
+  load();
+})();
+</script>
+{% endblock %}

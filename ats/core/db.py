@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from collections.abc import Iterator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -26,6 +26,20 @@ def get_engine() -> Engine:
         _engine = create_engine(
             settings.db_url, connect_args=connect_args, future=True
         )
+        if settings.db_url.startswith("sqlite"):
+            # QA-10.3: WAL + NORMAL sync — fewer write stalls with our many
+            # small writers (bars, signals, snapshots, journal) on the host
+            # laptop. No-op/harmless on :memory: test engines.
+            @event.listens_for(_engine, "connect")
+            def _sqlite_pragmas(dbapi_conn, _rec):  # noqa: ANN001
+                cur = dbapi_conn.cursor()
+                try:
+                    cur.execute("PRAGMA journal_mode=WAL")
+                    cur.execute("PRAGMA synchronous=NORMAL")
+                except Exception:  # noqa: BLE001 — pragmas are best-effort
+                    pass
+                finally:
+                    cur.close()
     return _engine
 
 

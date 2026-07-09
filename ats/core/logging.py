@@ -69,15 +69,61 @@ _STANDARD_ATTRS = set(
 ) | {"message", "asctime"}
 
 
-def configure_logging(level: str = "INFO") -> None:
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JsonFormatter())
+def configure_logging(
+    level: str = "INFO",
+    log_to_file: bool | None = None,
+    log_dir: str | None = None,
+    max_bytes: int = 10_000_000,
+    backup_count: int = 10,
+) -> None:
+    """Configure structured JSON logging to stdout, and (for unattended runs)
+    an optional rotating JSON file so a month of logs survives a terminal/SSH
+    session closing. File logging defaults follow ``Settings`` unless overridden.
+    """
     root = logging.getLogger()
     root.handlers.clear()
-    root.addHandler(handler)
+    formatter = JsonFormatter()
+
+    stream = logging.StreamHandler(sys.stdout)
+    stream.setFormatter(formatter)
+    root.addHandler(stream)
+
+    # Resolve file-logging defaults from settings when not explicitly passed.
+    if log_to_file is None or log_dir is None:
+        try:
+            from ats.core.config import get_settings
+
+            s = get_settings()
+            if log_to_file is None:
+                log_to_file = s.log_to_file
+            if log_dir is None:
+                log_dir = s.log_dir
+            max_bytes = s.log_max_bytes
+            backup_count = s.log_backup_count
+        except Exception:  # noqa: BLE001 - logging must never block on config
+            log_to_file = bool(log_to_file)
+
+    if log_to_file and log_dir:
+        try:
+            from logging.handlers import RotatingFileHandler
+            from pathlib import Path
+
+            Path(log_dir).mkdir(parents=True, exist_ok=True)
+            fileh = RotatingFileHandler(
+                str(Path(log_dir) / "ats.log"),
+                maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8",
+            )
+            fileh.setFormatter(formatter)
+            root.addHandler(fileh)
+        except Exception:  # noqa: BLE001 - fall back to stdout-only
+            logging.getLogger("ats.logging").warning("file_logging_setup_failed")
+
     root.setLevel(level)
-    # Quiet noisy third-party loggers.
-    for noisy in ("uvicorn.access", "apscheduler", "httpx", "httpcore"):
+    # Quiet noisy third-party loggers. Even under ATS_DEBUG these are pure
+    # transport chatter (yfinance's cookie/crumb dance, its peewee cookie
+    # cache, HTTP internals) that floods the log and hides our own lines.
+    for noisy in ("uvicorn.access", "apscheduler", "httpx", "httpcore",
+                  "yfinance", "peewee", "urllib3", "curl_cffi"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 

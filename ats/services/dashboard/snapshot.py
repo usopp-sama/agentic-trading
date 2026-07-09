@@ -9,6 +9,7 @@ from ats.core.config import get_settings
 from ats.core.db import session_scope
 from ats.core.logging import get_logger
 from ats.core.models import Decision, NewsItem, SentimentScore, SmeOpinion
+from ats.services.opportunities import build_opportunities
 
 log = get_logger("ats.dashboard")
 
@@ -28,6 +29,11 @@ def build_snapshot(orch) -> dict:
     learning = orch.get("learning") if orch else None
     rules = orch.get("rules") if orch else None
     market = orch.get("market_data") if orch else None
+    strategies = orch.get("strategies") if orch else None
+    regime = orch.get("regime") if orch else None
+    options_data = orch.get("options_data") if orch else None
+    vol_premium = orch.get("vol_premium") if orch else None
+    watchdog = orch.get("watchdog") if orch else None
 
     nlp = orch.get("nlp") if orch else None
     portfolio = _safe(lambda: execution.get_snapshot(), {}) if execution else {}
@@ -88,13 +94,19 @@ def build_snapshot(orch) -> dict:
             "macro_tilt": round(agents.macro_tilt, 4) if agents else 0.0,
             "watchlist": len(watchset),
             "audit_chain_ok": _safe(state.verify_audit_chain, True),
+            "regime": _safe(lambda: regime.current().label, "range/normal") if regime else "range/normal",
         },
+        "sleeves": _safe(lambda: strategies.sleeve_stats(), []) if strategies else [],
+        "options": _safe(lambda: options_data.latest(), None) if options_data else None,
+        "vol_premium": _safe(lambda: vol_premium.book_stats(), {}) if vol_premium else {},
+        "watchdog": _safe(lambda: watchdog.status(), {}) if watchdog else {},
         "portfolio": portfolio,
         "decisions": decisions,
         "opinions": opinions,
         "news": news[:12],
         "watchlist_news": watchlist_news,
         "sentiment_board": sentiment_board,
+        "opportunities": _safe(lambda: build_opportunities(orch, limit=8), []),
         "approvals": _safe(lambda: execution.list_pending_approvals(), []) if execution else [],
         "leaderboard": _safe(lambda: learning.leaderboard(), []) if learning else [],
         "rulebook": _safe(lambda: rules.rulebook(), []) if rules else [],

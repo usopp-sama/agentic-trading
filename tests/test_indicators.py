@@ -62,3 +62,67 @@ def test_invalid_window_raises(close):
         indicators.sma(close, 0)
     with pytest.raises(ValueError):
         indicators.ema(close, -3)
+
+
+@pytest.fixture
+def ohlcv() -> pd.DataFrame:
+    return synthetic_prices(n=120, seed=7)
+
+
+def test_atr_constant_range_converges_to_range():
+    n = 60
+    close = pd.Series([100.0] * n)
+    df = pd.DataFrame(
+        {"high": close + 1.0, "low": close - 1.0, "close": close}
+    )
+    result = indicators.atr(df, 14).dropna()
+    # No gaps and a constant 2.0 true range -> ATR is exactly 2.0.
+    assert result.iloc[-1] == pytest.approx(2.0)
+
+
+def test_atr_positive_and_warmup(ohlcv):
+    result = indicators.atr(ohlcv, 14)
+    assert result.iloc[:13].isna().all()
+    assert (result.dropna() > 0).all()
+
+
+def test_donchian_excludes_current_bar():
+    rising = pd.Series(np.arange(1.0, 61.0))
+    df = pd.DataFrame({"high": rising, "low": rising - 0.5, "close": rising})
+    ch = indicators.donchian(df, 20).dropna()
+    aligned = df.loc[ch.index]
+    # In a strictly rising series every close is a breakout of the
+    # PRIOR 20-bar high; with an unshifted channel this would be equality.
+    assert (aligned["close"] > ch["upper"]).all()
+
+
+def test_donchian_bands_ordered(ohlcv):
+    ch = indicators.donchian(ohlcv, 20).dropna()
+    assert (ch["upper"] >= ch["mid"]).all()
+    assert (ch["mid"] >= ch["lower"]).all()
+
+
+def test_adx_high_in_strong_trend_low_in_chop():
+    n = 120
+    trend = pd.Series(100.0 + 1.5 * np.arange(n))
+    df_trend = pd.DataFrame({"high": trend + 0.5, "low": trend - 0.5, "close": trend})
+    rng = np.random.default_rng(1)
+    chop = pd.Series(100.0 + np.cumsum(rng.normal(0.0, 0.1, n)))
+    df_chop = pd.DataFrame({"high": chop + 0.5, "low": chop - 0.5, "close": chop})
+    assert float(indicators.adx(df_trend, 14)["adx"].iloc[-1]) > 40.0
+    assert float(indicators.adx(df_chop, 14)["adx"].iloc[-1]) < 35.0
+
+
+def test_adx_direction_matches_trend():
+    n = 120
+    up = pd.Series(100.0 + 1.0 * np.arange(n))
+    df = pd.DataFrame({"high": up + 0.5, "low": up - 0.5, "close": up})
+    dmi = indicators.adx(df, 14)
+    assert float(dmi["plus_di"].iloc[-1]) > float(dmi["minus_di"].iloc[-1])
+
+
+def test_keltner_bands_ordered_and_atr_scaled(ohlcv):
+    kc = indicators.keltner_channel(ohlcv, 20, 10, 2.0).dropna()
+    assert len(kc) > 0
+    assert (kc["upper"] >= kc["mid"]).all()
+    assert (kc["mid"] >= kc["lower"]).all()

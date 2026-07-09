@@ -1,0 +1,185 @@
+/* ============================================================
+   LIQUID GLASS — Apple-inspired translucent material (2025).
+   Recreates the three layers Apple describes:
+     · illumination — translucent tint + backdrop blur/saturate
+     · highlight    — a bright specular edge (top-left)
+     · shadow       — layered depth so panels float
+   over a rotating wallpaper (see liquidglass.js). Fonts are
+   Windows-local (Segoe UI Variable) — zero external requests.
+
+   Loaded AFTER app.css; every rule is scoped to
+   [data-theme="liquidglass"], so toggling away fully restores the
+   other themes. Perf note: backdrop-filter is GPU work — the blur
+   is kept moderate (~18px) for the host laptop's iGPU, and all
+   motion (wallpaper crossfade, hover sheen) is gated behind
+   [data-motion="full"].
+   ============================================================ */
+
+/* ---------- tokens: dark ("Midnight Glass", default) ---------- */
+[data-theme="liquidglass"]{
+  --bg:#070b16;
+  --panel:rgba(22,28,46,.44); --panel2:rgba(40,50,76,.44); --elev:rgba(56,68,100,.52);
+  --text:#f3f7fd; --muted:#c0ccde; --border:rgba(255,255,255,.16);
+  --accent:#7cc4ff; --accent2:#c6a2ff; --accent-ink:#04121f;
+  --green:#4ee6a8; --red:#ff7a94; --amber:#ffd166; --blue:#7cc4ff; --purple:#c6a2ff;
+  --radius:20px; --radius-sm:13px;
+  --font:"Segoe UI Variable Text","Segoe UI",system-ui,Roboto,Helvetica,Arial,sans-serif;
+  --font-display:"Segoe UI Variable Display","Segoe UI",system-ui,sans-serif;
+  --shadow:0 10px 34px rgba(0,0,0,.42), 0 1px 0 rgba(255,255,255,.18) inset;
+  --shadow-sm:0 4px 18px rgba(0,0,0,.3), 0 1px 0 rgba(255,255,255,.14) inset;
+  --lg-blur:18px; --lg-sat:175%;
+  color-scheme:dark;
+}
+/* ---------- tokens: light ("Bright Glass") ---------- */
+[data-theme="liquidglass"][data-variant="light"]{
+  --bg:#aeb9cf;
+  --panel:rgba(255,255,255,.5); --panel2:rgba(255,255,255,.4); --elev:rgba(255,255,255,.62);
+  --text:#0f1a2c; --muted:#3f4b60; --border:rgba(255,255,255,.6);
+  --accent:#0a6ce0; --accent2:#7b46d6; --accent-ink:#ffffff;
+  --green:#0a8f5f; --red:#d63b57; --amber:#a9761a; --blue:#0a6ce0; --purple:#7b46d6;
+  --shadow:0 10px 30px rgba(20,30,50,.2), 0 1px 0 rgba(255,255,255,.7) inset;
+  --shadow-sm:0 4px 16px rgba(20,30,50,.14), 0 1px 0 rgba(255,255,255,.6) inset;
+  color-scheme:light;
+}
+
+/* ---------- wallpaper backdrop ---------- */
+/* CSS gradient is the no-JS / empty-folder fallback; liquidglass.js layers the
+   rotating photo (.lg-wallpaper ×2 for crossfade) + a legibility scrim on top. */
+[data-theme="liquidglass"] body{
+  background:
+    radial-gradient(1200px 820px at 12% 16%, #1b3a6b 0%, transparent 55%),
+    radial-gradient(1000px 900px at 88% 10%, #4a2a7a 0%, transparent 55%),
+    radial-gradient(1200px 1000px at 60% 104%, #0e5b57 0%, transparent 55%),
+    #070b16;
+  background-attachment:fixed;
+}
+[data-theme="liquidglass"][data-variant="light"] body{
+  background:
+    radial-gradient(1200px 820px at 12% 16%, #cfe0ff 0%, transparent 55%),
+    radial-gradient(1000px 900px at 88% 10%, #e6d4ff 0%, transparent 55%),
+    radial-gradient(1200px 1000px at 60% 104%, #cfeee9 0%, transparent 55%),
+    #aeb9cf;
+  background-attachment:fixed;
+}
+[data-theme="liquidglass"] .lg-wallpaper{
+  position:fixed; inset:0; z-index:-3; background-size:cover; background-position:center;
+  opacity:0; transition:opacity 1.4s ease; will-change:opacity;
+}
+[data-theme="liquidglass"][data-motion="reduced"] .lg-wallpaper{ transition:none; }
+[data-theme="liquidglass"] .lg-scrim{
+  position:fixed; inset:0; z-index:-2; pointer-events:none;
+  background:linear-gradient(180deg, rgba(6,9,18,.34), rgba(6,9,18,.56));
+}
+[data-theme="liquidglass"][data-variant="light"] .lg-scrim{
+  background:linear-gradient(180deg, rgba(255,255,255,.28), rgba(226,232,244,.5));
+}
+
+/* ---------- the glass material (illumination + shadow) ---------- */
+[data-theme="liquidglass"] header,
+[data-theme="liquidglass"] .card,
+[data-theme="liquidglass"] .popover,
+[data-theme="liquidglass"] .toast,
+[data-theme="liquidglass"] .reader,
+[data-theme="liquidglass"] .banner,
+[data-theme="liquidglass"] .explain-pop,
+[data-theme="liquidglass"] details.act,
+[data-theme="liquidglass"] .stage,
+[data-theme="liquidglass"] .cr-card{
+  background:var(--panel);
+  backdrop-filter:blur(var(--lg-blur)) saturate(var(--lg-sat));
+  -webkit-backdrop-filter:blur(var(--lg-blur)) saturate(var(--lg-sat));
+  border:1px solid var(--border);
+  box-shadow:var(--shadow);
+}
+[data-theme="liquidglass"] header{
+  border-radius:0; border-left:0; border-right:0; border-top:0;
+  border-bottom:1px solid var(--border);
+}
+/* denser popovers/toasts get a touch more opacity so dense text stays legible */
+[data-theme="liquidglass"] .popover,
+[data-theme="liquidglass"] .toast,
+[data-theme="liquidglass"] .explain-pop{ background:var(--elev); backdrop-filter:blur(26px) saturate(180%); }
+
+/* highlight: the bright specular edge + hover sheen (the "alive" cue) */
+[data-theme="liquidglass"] .card{ position:relative; border-radius:var(--radius); }
+[data-theme="liquidglass"] .card::before{
+  content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+  background:linear-gradient(135deg, rgba(255,255,255,.30), rgba(255,255,255,0) 44%);
+  opacity:.55; mix-blend-mode:screen;
+}
+[data-theme="liquidglass"][data-variant="light"] .card::before{ opacity:.85; }
+[data-theme="liquidglass"] .card::after{
+  content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+  background:linear-gradient(115deg, transparent 34%, rgba(255,255,255,.16) 48%, transparent 60%);
+  transform:translateX(-120%); opacity:0;
+}
+@keyframes lg-sheen{ to{ transform:translateX(120%); opacity:1; } }
+[data-theme="liquidglass"][data-motion="full"] .card:hover{ transform:translateY(-2px); }
+[data-theme="liquidglass"][data-motion="full"] .card:hover::after{ animation:lg-sheen .9s ease; }
+
+/* ---------- controls ---------- */
+[data-theme="liquidglass"] button,
+[data-theme="liquidglass"] select,
+[data-theme="liquidglass"] .icon-btn,
+[data-theme="liquidglass"] .charttools input,
+[data-theme="liquidglass"] .cr-cmd input{
+  background:rgba(255,255,255,.10); border:1px solid var(--border);
+  backdrop-filter:blur(10px) saturate(160%);
+}
+[data-theme="liquidglass"][data-variant="light"] button,
+[data-theme="liquidglass"][data-variant="light"] select,
+[data-theme="liquidglass"][data-variant="light"] .icon-btn{ background:rgba(255,255,255,.5); }
+[data-theme="liquidglass"] button:hover,[data-theme="liquidglass"] .icon-btn:hover{
+  border-color:color-mix(in srgb,var(--accent) 60%,transparent);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent);
+}
+[data-theme="liquidglass"] button.primary{
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  border-color:transparent; color:var(--accent-ink); font-weight:700;
+}
+[data-theme="liquidglass"] .seg{ background:rgba(255,255,255,.08); }
+[data-theme="liquidglass"] .seg button.sel{
+  background:color-mix(in srgb,var(--accent) 20%,transparent); color:var(--text);
+}
+/* kill switch keeps a soft red rim */
+[data-theme="liquidglass"] #killBtn{ border-color:color-mix(in srgb,var(--red) 50%,transparent); }
+
+/* ---------- nav ---------- */
+[data-theme="liquidglass"] nav a{ border:1px solid transparent; }
+[data-theme="liquidglass"] nav a.active{
+  background:color-mix(in srgb,var(--accent) 14%,transparent);
+  border-color:color-mix(in srgb,var(--accent) 30%,transparent); color:var(--accent);
+}
+
+/* ---------- pills / chips / tags (frosted, tinted) ---------- */
+[data-theme="liquidglass"] .pill{ backdrop-filter:blur(8px); border:1px solid var(--border); }
+[data-theme="liquidglass"] .pill.green{ background:color-mix(in srgb,var(--green) 22%,transparent); color:var(--green); }
+[data-theme="liquidglass"] .pill.red{ background:color-mix(in srgb,var(--red) 22%,transparent); color:var(--red); }
+[data-theme="liquidglass"] .pill.amber{ background:color-mix(in srgb,var(--amber) 22%,transparent); color:var(--amber); }
+[data-theme="liquidglass"] .pill.blue{ background:color-mix(in srgb,var(--blue) 22%,transparent); color:var(--blue); }
+[data-theme="liquidglass"] .pill.accent{ background:color-mix(in srgb,var(--accent) 18%,transparent); color:var(--accent); }
+[data-theme="liquidglass"] .tag,[data-theme="liquidglass"] .tick,[data-theme="liquidglass"] .chip{
+  background:rgba(255,255,255,.08); border:1px solid var(--border);
+}
+
+/* ---------- tables + numerals ---------- */
+[data-theme="liquidglass"] td{ font-variant-numeric:tabular-nums; }
+[data-theme="liquidglass"] tr:hover td{ background:color-mix(in srgb,var(--accent) 6%,transparent); }
+[data-theme="liquidglass"] th{ color:var(--muted); }
+
+/* ---------- connection dot + status ---------- */
+[data-theme="liquidglass"] .wsdot.on{ box-shadow:0 0 8px var(--green),0 0 18px color-mix(in srgb,var(--green) 55%,transparent); }
+
+/* ---------- Control Room glass ---------- */
+[data-theme="liquidglass"] .cr-cell{ backdrop-filter:blur(6px); }
+[data-theme="liquidglass"] .cr-cmd{ background:color-mix(in srgb,var(--elev) 80%,transparent); }
+
+/* ---------- scrollbars ---------- */
+[data-theme="liquidglass"] ::-webkit-scrollbar{ width:9px; height:9px; }
+[data-theme="liquidglass"] ::-webkit-scrollbar-track{ background:transparent; }
+[data-theme="liquidglass"] ::-webkit-scrollbar-thumb{ background:rgba(255,255,255,.18); border-radius:8px; }
+[data-theme="liquidglass"] ::-webkit-scrollbar-thumb:hover{ background:color-mix(in srgb,var(--accent) 45%,rgba(255,255,255,.18)); }
+[data-theme="liquidglass"] *{ scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.18) transparent; }
+
+/* ---------- reader / drawer ---------- */
+[data-theme="liquidglass"] .reader,[data-theme="liquidglass"] .cr-drawer{ background:var(--elev); backdrop-filter:blur(28px) saturate(180%); }

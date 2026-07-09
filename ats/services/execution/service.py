@@ -9,14 +9,14 @@ Phase 7 without changing this service's external surface.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ats.core.db import session_scope
 from ats.core.events import EventBus, Topic
 from ats.core.logging import get_logger
-from ats.core.models import Approval, Decision, PnlDaily
+from ats.core.models import Approval, Decision, Fill, Order, PnlDaily
 from ats.core import state
 from ats.services.execution.autonomy import resolve_route
 from ats.services.execution.kite_adapter import KiteAdapter
@@ -53,22 +53,63 @@ class ExecutionService:
         self.kite = KiteAdapter()
         self._bus: EventBus | None = None
         self._md = None
+        self._orch = None
         self._peak_equity = 0.0
         self._pending: dict[int, Draft] = {}
 
+    @property
+    def _peak_key(self) -> str:
+        return f"risk:peak_equity:{self.account}"
+
     async def start(self, ctx) -> None:
         self._bus = ctx.bus
+        self._orch = ctx.orchestrator
         self._md = ctx.orchestrator.get("market_data")
         self.broker.set_price_fn(self.price_of)
+        # Recover peak equity so the drawdown-based daily-loss kill switch is
+        # not silently reset to 0 by a mid-month restart.
+        self._peak_equity = float(state.get_kv(self._peak_key, {"peak": 0.0}).get("peak", 0.0))
+        if self._peak_equity > 0:
+            log.info("peak_equity_restored", extra={"peak": self._peak_equity})
         ctx.bus.subscribe(Topic.DECISION, self._on_decision)
 
         from ats.core.config import get_settings
 
+        settings = get_settings()
         ctx.scheduler.add_job(
             self.record_equity, "interval",
-            seconds=max(60, get_settings().market_scan_interval_s),
+            seconds=max(60, settings.market_scan_interval_s),
             id="equity_snapshot", max_instances=1, coalesce=True,
         )
+
+        # Daily digest pushed shortly after the NSE close (IST), so an
+        # unattended run reports each day's outcome over the notify channel.
+        from ats.services.market_data.calendar import IST
+
+        ctx.scheduler.add_job(
+            self.push_daily_digest, "cron",
+            hour=settings.digest_hour, minute=settings.digest_minute, timezone=IST,
+            id="daily_digest", max_instances=1, coalesce=True,
+        )
+
+        # Intraday digests (IST) so an unattended run sends 2-3 status emails a
+        # day: a brief "what's going on right now" with equity, day P&L, open
+        # risk, biggest movers and the top opportunity. The close digest above
+        # is the authoritative end-of-day record.
+        for hour in settings.digest_intraday_hours:
+            ctx.scheduler.add_job(
+                self.push_intraday_digest, "cron",
+                hour=int(hour), minute=0, timezone=IST,
+                id=f"intraday_digest_{int(hour)}", max_instances=1, coalesce=True,
+            )
+
+    def _feed_degraded(self) -> bool:
+        from ats.core.config import get_settings
+
+        if not get_settings().feed_halt_entries_on_degrade:
+            return False
+        healthy_fn = getattr(self._md, "feed_healthy", None)
+        return bool(healthy_fn is not None and not healthy_fn())
 
     # --- price oracle ------------------------------------------------------
     def price_of(self, symbol: str) -> float | None:
@@ -98,7 +139,46 @@ class ExecutionService:
             return {"status": "BLOCKED", "reason": route.reason}
 
         side = "BUY" if action == "BUY" else "SELL"
+
+        # Feed-integrity gate: never OPEN new exposure on a degraded (mostly
+        # synthetic) live feed. Exits (SELL) are always allowed so positions can
+        # still be managed when data is poor.
+        if side == "BUY" and self._feed_degraded():
+            log.warning("entry_blocked_feed_degraded", extra={"symbol": symbol})
+            return {"status": "BLOCKED", "reason": "feed_degraded"}
+
+        # Quote-staleness gate (plan §1.1): never BUY against a quote older
+        # than the configured age. A quote never refreshed this session (age
+        # None) is stale by definition. Exits still pass.
+        from ats.core.config import get_settings
+
+        settings = get_settings()
+        if side == "BUY" and settings.max_quote_age_s > 0:
+            age_fn = getattr(self._md, "quote_age_s", None)
+            age = age_fn(symbol) if age_fn is not None else None
+            if age is None or age > settings.max_quote_age_s:
+                log.warning("entry_blocked_stale_quote",
+                            extra={"symbol": symbol, "age_s": age})
+                if decision.get("decision_id") is not None:
+                    self._mark_decision(decision["decision_id"], "stale_quote")
+                return {"status": "BLOCKED", "reason": "stale_quote", "age_s": age}
+
         price = self.price_of(symbol) or 0.0
+
+        # Price-deviation guard (plan §1.4): if the market moved more than the
+        # configured bps between decision and submission, don't chase — the
+        # next signal pass re-proposes against the fresh price.
+        ref_price = float(decision.get("ref_price") or 0.0)
+        if ref_price > 0 and price > 0 and settings.max_price_deviation_bps > 0:
+            deviation_bps = abs(price / ref_price - 1.0) * 10_000.0
+            if deviation_bps > settings.max_price_deviation_bps:
+                log.warning("order_blocked_price_deviation",
+                            extra={"symbol": symbol, "ref": ref_price,
+                                   "ltp": price, "bps": round(deviation_bps, 1)})
+                if decision.get("decision_id") is not None:
+                    self._mark_decision(decision["decision_id"], "price_moved")
+                return {"status": "BLOCKED", "reason": "price_deviation",
+                        "deviation_bps": round(deviation_bps, 1)}
         draft = Draft(
             decision_id=decision.get("decision_id"),
             symbol=symbol, side=side, qty=qty, est_price=price, use_real=route.use_real,
@@ -131,7 +211,23 @@ class ExecutionService:
             )
         return {"status": "PENDING_APPROVAL", "decision_id": draft.decision_id}
 
+    @staticmethod
+    def _already_filled(decision_id: int) -> bool:
+        """A decision must fill at most once. Guards against duplicate decision
+        events or a restart replaying the bus from creating phantom double
+        fills (the kind that polluted the early paper book)."""
+        with session_scope() as s:
+            n = s.execute(
+                select(func.count(Order.id)).where(
+                    Order.decision_id == decision_id, Order.status == "FILLED"
+                )
+            ).scalar_one()
+            return bool(n)
+
     async def _commit(self, draft: Draft) -> dict:
+        if draft.decision_id is not None and self._already_filled(draft.decision_id):
+            log.warning("duplicate_commit_skipped", extra={"decision_id": draft.decision_id})
+            return {"status": "DUPLICATE", "decision_id": draft.decision_id}
         # Real-broker routing is reachable only when the gate is open; in v1 it
         # is always paper. The Kite adapter itself also refuses without the gate.
         broker = self.kite if draft.use_real else self.broker
@@ -212,10 +308,24 @@ class ExecutionService:
     def record_equity(self) -> dict:
         snap = self.get_snapshot()
         equity = snap["equity"]
+        prev_peak = self._peak_equity
         self._peak_equity = max(self._peak_equity, equity)
+        if self._peak_equity > prev_peak:
+            # Persist new high-water marks so drawdown survives a restart.
+            state.set_kv(self._peak_key, {"peak": self._peak_equity})
         drawdown = (equity / self._peak_equity - 1.0) if self._peak_equity > 0 else 0.0
+        net = snap["realized_pnl"] + snap["unrealized_pnl"]
         today = date.today()
         with session_scope() as s:
+            # Cumulative fees paid by this account (for the gross/net split).
+            fees = float(
+                s.execute(
+                    select(func.coalesce(func.sum(Fill.fees), 0.0))
+                    .join(Order, Fill.order_id == Order.id)
+                    .where(Order.account == self.account)
+                ).scalar_one()
+                or 0.0
+            )
             row = s.execute(
                 select(PnlDaily).where(
                     PnlDaily.account == self.account, PnlDaily.day == today
@@ -225,6 +335,88 @@ class ExecutionService:
                 row = PnlDaily(account=self.account, day=today)
                 s.add(row)
             row.equity = equity
-            row.net = snap["realized_pnl"] + snap["unrealized_pnl"]
+            row.net = net
+            # Complete the daily accounting: gross (pre-fee) and fees to date.
+            row.fees = round(fees, 2)
+            row.gross = round(net + fees, 2)
             row.drawdown = round(drawdown, 4)
         return {"equity": equity, "drawdown": round(drawdown, 4)}
+
+    def push_daily_digest(self) -> dict:
+        """Compose and send an end-of-day summary over the notify channel.
+
+        Skipped on non-trading days. Refreshes the equity row first so the
+        numbers reflect the close.
+        """
+        from ats.services.market_data.calendar import is_trading_day
+
+        today = date.today()
+        if not is_trading_day(today):
+            return {"skipped": "not_trading_day"}
+        try:
+            self.record_equity()
+        except Exception as exc:  # noqa: BLE001 - digest must not raise in cron
+            log.warning("digest_record_equity_failed", extra={"error": str(exc)})
+        snap = self.get_snapshot()
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
+        with session_scope() as s:
+            row = s.execute(
+                select(PnlDaily).where(
+                    PnlDaily.account == self.account, PnlDaily.day == today
+                )
+            ).scalar_one_or_none()
+            fills_24h = int(
+                s.execute(
+                    select(func.count(Fill.id))
+                    .join(Order, Fill.order_id == Order.id)
+                    .where(Order.account == self.account, Fill.ts >= cutoff)
+                ).scalar_one()
+                or 0
+            )
+        net = float(row.net) if row else 0.0
+        dd = float(row.drawdown) if row else 0.0
+        cur = "Rs"
+        msg = (
+            f"Daily digest {today.isoformat()}: equity {cur}{snap['equity']:,.0f} | "
+            f"net P&L {cur}{net:+,.0f} | drawdown {dd * 100:.1f}% | "
+            f"{fills_24h} fills (24h) | {len(snap['positions'])} open positions."
+        )
+        notify(msg)
+        log.info("daily_digest", extra={"net": round(net, 2), "fills_24h": fills_24h})
+        return {"digest": msg, "net": net, "fills_24h": fills_24h}
+
+    def _movers(self, snap: dict, threshold_pct: float = 3.0) -> list[str]:
+        """Open positions with a large mark-to-market swing — the "sudden
+        movements" worth flagging in an intraday note."""
+        out: list[str] = []
+        for p in snap.get("positions", []):
+            cost = abs(p.get("avg_price", 0.0) * p.get("qty", 0))
+            if cost <= 0:
+                continue
+            pct = 100.0 * p.get("unrealized_pnl", 0.0) / cost
+            if abs(pct) >= threshold_pct:
+                out.append(f"{p['symbol']} {pct:+.1f}% (Rs{p.get('unrealized_pnl', 0):+,.0f})")
+        return out
+
+    def push_intraday_digest(self) -> dict:
+        """A short "what's going on right now" note, sent 2-3x/day on a cron.
+
+        Trading-day only. Deterministic (no LLM) so it always sends, even if the
+        model provider is rate-limited. Movers above the threshold double as the
+        "sudden movement" alert the operator asked for.
+        """
+        from ats.services.market_data.calendar import is_trading_day
+
+        today = date.today()
+        if not is_trading_day(today):
+            return {"skipped": "not_trading_day"}
+        try:
+            from ats.services.dashboard.summary import digest_text
+
+            msg, payload = digest_text(self._orch, label="Intraday update")
+        except Exception as exc:  # noqa: BLE001 - digest must not raise in cron
+            log.warning("intraday_digest_failed", extra={"error": str(exc)})
+            return {"error": str(exc)}
+        notify(msg)
+        log.info("intraday_digest", extra={"equity": payload.get("equity")})
+        return {"digest": msg, **payload}

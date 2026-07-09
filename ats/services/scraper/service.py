@@ -69,7 +69,9 @@ class ScraperService:
         # Real, live news first: a finance news API if a key is set, plus
         # credible Indian finance RSS feeds (always best-effort).
         if settings.marketaux_api_key:
-            collectors.append(MarketauxCollector(settings.marketaux_api_key))
+            collectors.append(
+                MarketauxCollector(settings.marketaux_api_key, settings.marketaux_min_interval_s)
+            )
         collectors.append(RssCollector())
 
         # Mock is only an offline safety net - used when live feeds return

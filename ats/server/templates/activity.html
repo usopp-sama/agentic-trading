@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}Activity{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="card span12 reveal">
+    <h2>What's going on right now</h2>
+    <p class="sub" id="sumLine">Loading…</p>
+    <div id="sumMovers" class="muted" style="margin-top:6px"></div>
+  </div>
+
+  <div class="card span12 reveal">
+    <h2>Order activity &amp; why</h2>
+    <p class="sub">Every order we placed and the full reasoning behind it — the CIO call, the experts who weighed in, the strategy signals that fired, and the risk rules applied.</p>
+    <div class="llm-controls">
+      <label class="muted">Account
+        <select id="accountSel"><option value="">all accounts</option></select>
+      </label>
+      <button id="csvBtn" title="Download the trade logbook as CSV">Export CSV</button>
+      <span class="spacer"></span>
+      <span class="muted" id="actStats"></span>
+    </div>
+    <div id="activity"><div class="empty">No orders yet.</div></div>
+  </div>
+
+  <div class="card span12 reveal">
+    <h2>Closed trades — was the exit any good?</h2>
+    <p class="sub">
+      Round trips with the outcome fields that matter: holding period, realized P&amp;L
+      <b>after fees</b>, best/worst excursion while held, and what NIFTYBEES did over the
+      same window — a trade that made 2% while the index made 3% is a loss in disguise.
+    </p>
+    <div style="overflow:auto">
+      <table>
+        <thead><tr>
+          <th>Exit</th><th>Account</th><th>Symbol</th><th>Qty</th><th>Held</th>
+          <th>Entry→Exit</th><th>Net P&amp;L</th><th>Return</th><th>MFE / MAE</th>
+          <th>NIFTYBEES</th><th>Alpha</th>
+        </tr></thead>
+        <tbody id="outcomes"><tr><td colspan="11" class="muted">No closed trades yet.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+(function () {
+  const A = window.ATS;
+  let account = "";
+
+  function stancePill(stance) {
+    const s = (stance || "").toLowerCase();
+    const cls = (s.includes("bull") || s === "buy" || s === "long") ? "green"
+      : (s.includes("bear") || s === "sell" || s === "short") ? "red" : "gray";
+    return `<span class="pill ${cls}">${A.esc(stance || "neutral")}</span>`;
+  }
+
+  function featBits(f) {
+    if (!f || typeof f !== "object") return "";
+    return Object.entries(f).slice(0, 5)
+      .map(([k, v]) => `<code>${A.esc(k)}=${A.esc(typeof v === "number" ? (Math.round(v * 1000) / 1000) : v)}</code>`)
+      .join(" ");
+  }
+
+  function whyBlock(w) {
+    if (!w) return "";
+    let html = "";
+    if (w.sme && w.sme.length) {
+      html += `<div class="why-grp"><h4>Experts (${w.sme.length})</h4>` +
+        w.sme.map((o) =>
+          `<div class="why-row">${stancePill(o.stance)} <b>${A.esc(o.sme)}</b>
+           <span class="muted">conv ${A.esc(o.conviction)} · ${A.esc(o.horizon || "")}</span>
+           <div class="muted">${A.esc(o.rationale || "")}</div>
+           ${(o.key_risks && o.key_risks.length) ? `<div class="muted">⚠ ${o.key_risks.map(A.esc).join("; ")}</div>` : ""}
+           </div>`).join("") + `</div>`;
+    }
+    if (w.signals && w.signals.length) {
+      html += `<div class="why-grp"><h4>Strategy signals (${w.signals.length})</h4>` +
+        w.signals.map((sg) =>
+          `<div class="why-row">${stancePill(sg.stance)} <b>${A.esc(sg.strategy)}</b>
+           <span class="muted">conv ${A.esc(sg.conviction)}</span>
+           <div class="muted">${featBits(sg.features)}</div></div>`).join("") + `</div>`;
+    }
+    if (w.rules && w.rules.length) {
+      html += `<div class="why-grp"><h4>Risk rules applied</h4><div class="muted">` +
+        w.rules.map((r) => `<code>${A.esc(typeof r === "object" ? JSON.stringify(r) : r)}</code>`).join(" ") +
+        `</div></div>`;
+    }
+    return html || `<div class="muted">No reasoning recorded for this order.</div>`;
+  }
+
+  function renderActivity(d) {
+    const el = document.getElementById("activity");
+    const items = (d && d.activity) || [];
+    // Keep the account dropdown in sync with every book that ever traded.
+    const sel = document.getElementById("accountSel");
+    const known = new Set(Array.from(sel.options).map((o) => o.value));
+    (d.accounts || []).forEach((a) => {
+      if (!known.has(a)) {
+        const opt = document.createElement("option");
+        opt.value = a; opt.textContent = a;
+        sel.appendChild(opt);
+      }
+    });
+    document.getElementById("actStats").textContent =
+      `${items.length} fills shown${account ? ` · account ${account}` : " · all accounts"}`;
+    if (!items.length) { el.innerHTML = '<div class="empty">No orders yet.</div>'; return; }
+    el.innerHTML = items.map((t, i) => {
+      const side = (t.side === "BUY") ? "LONG" : "SHORT";
+      return `<details class="act" ${i === 0 ? "open" : ""}>
+        <summary>
+          <span class="side ${side}">${A.esc(t.side)}</span>
+          <b>${A.esc(t.symbol)}</b>
+          <span class="pill gray">${A.esc(t.account || "paper")}</span>
+          <span class="muted">${A.esc(t.qty)} @ ${A.fmt(t.price)} = ${A.fmtMoney(t.value)}</span>
+          <span class="spacer"></span>
+          <span class="muted">${A.esc((t.ts || "").replace("T", " ").slice(0, 16))}</span>
+        </summary>
+        <div class="act-body">
+          <p class="rationale">${A.esc(t.rationale || "(no rationale logged)")}</p>
+          ${whyBlock(t.why)}
+        </div>
+      </details>`;
+    }).join("");
+  }
+
+  function renderOutcomes(d) {
+    const el = document.getElementById("outcomes");
+    const rows = (d && d.trades) || [];
+    if (!rows.length) { el.innerHTML = '<tr><td colspan="11" class="muted">No closed trades yet.</td></tr>'; return; }
+    const pct = (x) => (x === null || x === undefined) ? "–" : `${x >= 0 ? "+" : ""}${Number(x).toFixed(2)}%`;
+    el.innerHTML = rows.map((t) => `
+      <tr>
+        <td>${A.esc((t.exit_ts || "").replace("T", " ").slice(0, 16))}</td>
+        <td><span class="pill gray">${A.esc(t.account)}</span></td>
+        <td><b>${A.esc(t.symbol)}</b></td>
+        <td>${t.qty}</td>
+        <td>${t.holding_days === null ? "–" : t.holding_days + "d"}</td>
+        <td class="muted">${A.fmt(t.entry_price)} → ${A.fmt(t.exit_price)}</td>
+        <td class="${A.signClass(t.net_pnl)}">${A.fmtMoney(t.net_pnl)} <span class="muted">(fees ${A.fmt(t.fees)})</span></td>
+        <td class="${A.signClass(t.return_pct)}">${pct(t.return_pct)}</td>
+        <td><span class="pos">${pct(t.mfe_pct)}</span> / <span class="neg">${pct(t.mae_pct)}</span></td>
+        <td>${pct(t.benchmark_return_pct)}</td>
+        <td class="${A.signClass(t.alpha_pct)}"><b>${pct(t.alpha_pct)}</b></td>
+      </tr>`).join("");
+  }
+
+  function renderSummary(s) {
+    if (!s) return;
+    document.getElementById("sumLine").innerHTML =
+      `Mode <b>${A.esc(s.mode)}</b> · regime ${A.esc(s.regime)} · feed ${A.esc(s.feed)} · ` +
+      `equity <b>${A.fmtMoney(s.equity)}</b> · day P&L <b class="${A.signClass(s.day_net)}">${A.fmtMoney(s.day_net)}</b> · ` +
+      `${A.esc(s.open_positions)} open positions${s.kill_switch ? ' · <span class="pill red">KILL ON</span>' : ""}`;
+    const m = document.getElementById("sumMovers");
+    m.innerHTML = (s.movers && s.movers.length)
+      ? "Big moves: " + s.movers.map((x) => `<span class="pill ${x.pct >= 0 ? "green" : "red"}">${A.esc(x.symbol)} ${x.pct >= 0 ? "+" : ""}${A.esc(x.pct)}%</span>`).join(" ")
+      : "";
+  }
+
+  function qs() { return account ? `&account=${encodeURIComponent(account)}` : ""; }
+  function loadAll() {
+    A.fetchJSON("/api/summary").then(renderSummary).catch(() => {});
+    A.fetchJSON(`/api/activity?limit=100${qs()}`).then(renderActivity).catch(() => {});
+    A.fetchJSON(`/api/activity/outcomes?limit=50${qs()}`).then(renderOutcomes).catch(() => {});
+  }
+
+  document.getElementById("accountSel").addEventListener("change", (e) => {
+    account = e.target.value; loadAll();
+  });
+  document.getElementById("csvBtn").addEventListener("click", () => {
+    window.location.href = `/api/activity/export.csv?limit=2000${qs()}`;
+  });
+
+  loadAll();
+  A.on("snapshot", loadAll);
+})();
+</script>
+{% endblock %}

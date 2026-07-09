@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% block title %}Research{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="card span12 reveal">
+    <h2>The research factory</h2>
+    <p class="sub">
+      The slow loop: agents research on a calendar (weekly passes Saturday, the
+      allocation committee first Sunday monthly) and produce <b>hypotheses</b>, not
+      trades. Nothing trades that did not survive the walk-forward gate; agents are
+      scored by <b>hypothesis survival</b>, not per-trade luck. Committee
+      recommendations below take effect only after your approval — bounded ±10% tilts,
+      never guardrails.
+    </p>
+    <div class="llm-controls">
+      <button data-role="macro_analyst" class="runRole">Run macro</button>
+      <button data-role="fundamentals_analyst" class="runRole">Run fundamentals</button>
+      <button data-role="strategy_researcher" class="runRole">Run researcher</button>
+      <button data-role="risk_reviewer" class="runRole">Run risk review</button>
+      <button data-role="committee" class="runRole">Run committee</button>
+      <button id="fRefresh">Refresh</button>
+      <span class="spacer"></span>
+      <span class="muted" id="budgetStats">–</span>
+    </div>
+  </div>
+
+  <div class="card span12 reveal">
+    <h3>Hypothesis registry</h3>
+    <p class="sub">PROPOSED → SPECIFIED → BACKTESTED → SHADOW → PAPER → LIVE, with REJECTED the honest graveyard. Click a card for its full history.</p>
+    <div id="kanban" style="display:grid;grid-template-columns:repeat(7,minmax(150px,1fr));gap:8px;overflow-x:auto"></div>
+  </div>
+
+  <div class="card span6 reveal">
+    <h3>Agent scoreboard — survival rate</h3>
+    <div style="overflow:auto">
+      <table>
+        <thead><tr><th>Agent</th><th>Proposed</th><th>In flight</th><th>Survived</th><th>Rejected</th><th>Survival</th></tr></thead>
+        <tbody id="scores"><tr><td colspan="6" class="muted">No hypotheses yet.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card span6 reveal">
+    <h3>Committee recommendations</h3>
+    <p class="sub">Bounded allocation tilts awaiting your verdict; approved tilts apply at the next reallocation.</p>
+    <div id="recs"><div class="empty">No recommendations yet — the committee runs the first Sunday of the month.</div></div>
+  </div>
+
+  <div class="card span12 reveal">
+    <h3>Research notes</h3>
+    <div id="notes"><div class="empty">No notes yet — weekly passes run Saturday 10:00 IST.</div></div>
+  </div>
+
+  <div class="card span12 reveal" id="detailCard" style="display:none">
+    <h3 id="detailTitle">Hypothesis</h3>
+    <div id="detailBody"></div>
+  </div>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+(function () {
+  const A = window.ATS;
+  const STAGE_COLORS = { PROPOSED: "gray", SPECIFIED: "blue", BACKTESTED: "accent",
+                         SHADOW: "blue", PAPER: "green", LIVE: "green", REJECTED: "red" };
+  let lastSig = null;
+
+  function pill(stage) { return `<span class="pill ${STAGE_COLORS[stage] || "gray"}">${A.esc(stage)}</span>`; }
+
+  function renderKanban(d) {
+    const el = document.getElementById("kanban");
+    el.innerHTML = (d.stages || []).map((stage) => {
+      const cards = (d.kanban[stage] || []).map((h) => `
+        <div class="chip hypCard" data-id="${h.id}" style="display:block;margin:4px 0;cursor:pointer">
+          <b>#${h.id} ${A.esc(h.title.slice(0, 60))}</b><br>
+          <span class="muted">${A.esc(h.agent)}</span>
+          ${h.backtest && h.backtest.sharpe !== undefined ? `<span class="muted"> · Sharpe ${h.backtest.sharpe}</span>` : ""}
+        </div>`).join("");
+      return `<div><div style="text-align:center">${pill(stage)} <span class="muted">${(d.kanban[stage] || []).length}</span></div>${cards}</div>`;
+    }).join("");
+    el.querySelectorAll(".hypCard").forEach((c) =>
+      c.addEventListener("click", () => loadDetail(c.dataset.id)));
+  }
+
+  function renderScores(d) {
+    const rows = d.scores || [];
+    document.getElementById("scores").innerHTML = rows.length ? rows.map((r) => `
+      <tr><td><b>${A.esc(r.agent)}</b></td><td>${r.proposed}</td><td>${r.in_flight}</td>
+      <td>${r.survived}</td><td>${r.rejected}</td>
+      <td>${r.survival_rate === null ? '<span class="muted">no verdicts yet</span>' : (r.survival_rate * 100).toFixed(0) + "%"}</td></tr>`).join("")
+      : '<tr><td colspan="6" class="muted">No hypotheses yet.</td></tr>';
+  }
+
+  function renderRecs(d) {
+    const el = document.getElementById("recs");
+    const rows = d.recommendations || [];
+    if (!rows.length) { el.innerHTML = '<div class="empty">No recommendations yet — the committee runs the first Sunday of the month.</div>'; return; }
+    el.innerHTML = rows.map((r) => {
+      const tilts = Object.entries(r.tilts || {}).map(([k, v]) =>
+        `<span class="chip">${A.esc(k)} <b class="${v > 0 ? "pos" : "neg"}">${(v * 100).toFixed(0)}%</b></span>`).join(" ") || '<span class="muted">no tilts</span>';
+      const actions = r.status === "pending"
+        ? `<button class="recAct" data-id="${r.id}" data-act="approve">Approve</button>
+           <button class="recAct danger" data-id="${r.id}" data-act="reject">Reject</button>`
+        : `<span class="pill ${r.status === "approved" ? "green" : "red"}">${A.esc(r.status)}</span>`;
+      return `<details class="act" ${r.status === "pending" ? "open" : ""}>
+        <summary><span class="pill ${r.status === "pending" ? "accent" : "gray"}">#${r.id}</span>
+          <b>${A.esc((r.summary || "").slice(0, 90))}</b>
+          <span class="spacer"></span><span class="muted">${A.ago(r.ts)} ago</span></summary>
+        <div class="act-body">
+          <p class="rationale">${A.esc(r.rationale || "")}</p>
+          <div>${tilts}</div><div style="margin-top:8px">${actions}</div>
+        </div></details>`;
+    }).join("");
+    el.querySelectorAll(".recAct").forEach((b) => b.addEventListener("click", async () => {
+      await A.postJSON(`/api/research/recommendations/${b.dataset.id}/${b.dataset.act}`, {});
+      reload();
+    }));
+  }
+
+  function renderNotes(d) {
+    const el = document.getElementById("notes");
+    const rows = d.notes || [];
+    if (!rows.length) { el.innerHTML = '<div class="empty">No notes yet — weekly passes run Saturday 10:00 IST.</div>'; return; }
+    el.innerHTML = rows.map((n) => `
+      <details class="act"><summary>
+        <span class="pill gray">${A.esc(n.role)}</span> <b>${A.esc(n.title)}</b>
+        <span class="spacer"></span><span class="muted">${A.ago(n.ts)} ago</span></summary>
+      <div class="act-body"><p class="rationale" style="white-space:pre-wrap">${A.esc(n.content || "")}</p>
+      ${Object.keys(n.meta || {}).length ? `<p class="sub">${A.esc(JSON.stringify(n.meta))}</p>` : ""}</div></details>`).join("");
+  }
+
+  function loadDetail(id) {
+    A.fetchJSON(`/api/research/hypotheses/${id}`).then((h) => {
+      if (h.error) return;
+      document.getElementById("detailCard").style.display = "";
+      document.getElementById("detailTitle").textContent = `#${h.id} ${h.title}`;
+      const events = (h.events || []).map((e) =>
+        `<tr><td>${A.esc((e.ts || "").replace("T", " ").slice(0, 16))}</td>
+         <td>${A.esc(e.from || "—")} → ${A.esc(e.to)}</td><td>${A.esc(e.actor)}</td><td>${A.esc(e.note)}</td></tr>`).join("");
+      document.getElementById("detailBody").innerHTML = `
+        ${pill(h.stage)} <span class="muted">proposed by <b>${A.esc(h.agent)}</b></span>
+        <p class="rationale">${A.esc(h.thesis || "")}</p>
+        ${h.rule ? `<h4>Rule</h4><p class="rationale" style="white-space:pre-wrap">${A.esc(h.rule)}</p>` : ""}
+        ${h.evidence ? `<p class="sub">Evidence: ${A.esc(h.evidence)}</p>` : ""}
+        ${Object.keys(h.backtest || {}).length ? `<h4>Backtest gate</h4><p class="sub">${A.esc(JSON.stringify(h.backtest))}</p>` : ""}
+        <h4>History</h4>
+        <table><thead><tr><th>Time</th><th>Move</th><th>Actor</th><th>Note</th></tr></thead><tbody>${events}</tbody></table>`;
+      document.getElementById("detailCard").scrollIntoView({ behavior: "smooth" });
+    }).catch(() => {});
+  }
+
+  function render(d) {
+    const b = (d.factory || {}).budget || {};
+    const runs = (d.factory || {}).last_runs || {};
+    const lastWeekly = runs.strategy_researcher || runs.macro_analyst;
+    document.getElementById("budgetStats").textContent =
+      `LLM budget: ₹${(b.used_inr || 0).toFixed(0)} / ₹${(b.budget_inr || 0).toFixed(0)} this month` +
+      (b.exhausted ? " — EXHAUSTED (autonomous runs paused)" : "") +
+      (lastWeekly ? ` · last weekly pass ${A.ago(lastWeekly)} ago` : " · no weekly pass yet");
+    const sig = JSON.stringify([d.kanban, d.scores, d.recommendations.map((r) => [r.id, r.status]), d.notes.length]);
+    if (sig === lastSig) return;
+    lastSig = sig;
+    renderKanban(d); renderScores(d); renderRecs(d); renderNotes(d);
+  }
+
+  function load() { A.fetchJSON("/api/research").then(render).catch(() => {}); }
+  function reload() { lastSig = null; load(); }
+
+  document.getElementById("fRefresh").addEventListener("click", reload);
+  document.querySelectorAll(".runRole").forEach((b) => b.addEventListener("click", async () => {
+    b.disabled = true; b.textContent = "Running…";
+    try { await A.postJSON(`/api/research/run/${b.dataset.role}`, {}); } catch (e) {}
+    b.disabled = false; b.textContent = b.dataset.role === "committee" ? "Run committee" : `Run ${b.dataset.role.split("_")[0]}`;
+    reload();
+  }));
+  setInterval(load, 15000);
+  load();
+})();
+</script>
+{% endblock %}

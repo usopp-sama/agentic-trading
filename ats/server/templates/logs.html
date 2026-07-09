@@ -2,59 +2,93 @@
 {% block title %}Logs{% endblock %}
 {% block content %}
 <div class="grid">
-  <div class="card span4">
-    <h2>Topic Rates</h2><p class="sub">Cumulative event volume per topic this session.</p>
-    <div class="scroll" id="rates" style="max-height:520px"></div>
-  </div>
-  <div class="card span8">
-    <h2>Event Stream</h2>
-    <p class="sub">Every system event, colour-coded by pipeline stage. Newest on top.
+  <div class="card span12 reveal">
+    <h2>Application logs</h2>
+    <p class="sub">Tail of the structured server log (<code>var/logs/ats.log</code>) — startup, LLM retries/recovery, market data, errors. Newest first.</p>
+    <div class="llm-controls">
+      <label>Level
+        <select id="fLevel">
+          <option value="">All</option>
+          <option value="INFO">Info</option>
+          <option value="WARNING">Warning</option>
+          <option value="ERROR">Error</option>
+        </select>
+      </label>
+      <label>Show
+        <select id="fLimit">
+          <option>100</option>
+          <option selected>300</option>
+          <option>600</option>
+          <option>1000</option>
+        </select>
+      </label>
+      <label>Search <input type="text" id="fQ" placeholder="filter text…" style="background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:8px"></label>
+      <label class="chk"><input type="checkbox" id="fAuto" checked> Auto-refresh</label>
+      <button id="fRefresh">Refresh</button>
       <span class="spacer"></span>
-      <label class="muted"><input type="checkbox" id="pause"> pause</label>
-    </p>
-    <div class="scroll" id="stream" style="max-height:520px"></div>
+      <span class="muted" id="logStats"></span>
+    </div>
+  </div>
+
+  <div class="card span12 reveal">
+    <div id="logList" class="logwrap"><div class="empty">No log lines.</div></div>
   </div>
 </div>
 {% endblock %}
-
 {% block script %}
 <script>
-const $=(id)=>document.getElementById(id), E=ATS.esc, MAP=ATS.TOPIC_STAGE;
-const counters={}; const lines=[];
-function summarize(topic,p){
-  const sym=p.symbol||(p.tickers||[]).join(',')||'';
-  if(topic==='agent.opinion') return `${p.sme||''} ${p.stance||''} ${sym} ${ATS.fmt(p.conviction)}`;
-  if(topic==='exec.decision') return `${p.action||''} ${sym} ${p.status||''}`;
-  if(topic==='exec.fill') return `${sym} ${p.side||''} ${p.qty||''}@${ATS.fmt(p.fill_price)}`;
-  if(topic==='market.volume_spike') return `${sym} z=${ATS.fmt(p.zscore)}`;
-  if(topic==='news.item') return (p.title||'').slice(0,90);
-  if(topic==='news.sentiment') return `${sym} ${p.label||''} ${ATS.fmt(p.score)}`;
-  if(topic==='strategy.signal') return `${p.strategy||''} ${sym} ${p.stance||''}`;
-  return sym||JSON.stringify(p).slice(0,80);
-}
-function rowHtml(l){
-  const cl='t-'+(MAP[l.topic]||'other');
-  return `<div class="logline"><span class="t">${ATS.ago(l.ts)} ago</span>
-    <span class="topic ${cl}">${E(l.topic)}</span><span>${E(l.sum)}</span></div>`;
-}
-function drawStream(){ if($('pause').checked) return; $('stream').innerHTML=lines.map(rowHtml).join('')||'<div class="muted">Waiting…</div>'; }
-function drawRates(){
-  const rows=Object.entries(counters).sort((a,b)=>b[1]-a[1]); const max=Math.max(1,...rows.map(r=>r[1]));
-  $('rates').innerHTML=rows.map(([t,c])=>{
-    const cl='t-'+(MAP[t]||'other');
-    return `<div class="news-item"><span class="topic ${cl}">${E(t)}</span>
-      <span class="muted" style="float:right">${c}</span>
-      <div class="bar"><span style="width:${Math.round(c/max*100)}%;background:var(--blue)"></span></div></div>`;
-  }).join('')||'<div class="muted">No events yet.</div>';
-}
-function push(topic,payload,ts){ lines.unshift({topic,sum:summarize(topic,payload||{}),ts:ts||new Date().toISOString()}); lines.splice(300); }
+(function () {
+  const A = window.ATS;
+  const STD = new Set(["ts", "level", "logger", "msg", "exc"]);
 
-ATS.on('recent',(m)=>{
-  Object.assign(counters,m.counters||{});
-  (m.events||[]).forEach(e=>push(e.topic,e.payload,e.ts));
-  drawStream(); drawRates();
-});
-ATS.on('event',(m)=>{ counters[m.topic]=(counters[m.topic]||0)+1; push(m.topic,m.payload,m.ts); drawStream(); drawRates(); });
-ATS.fetchJSON('/api/logs').then(d=>{ Object.assign(counters,d.counters||{}); drawRates(); }).catch(()=>{});
+  function extras(rec) {
+    const bits = [];
+    for (const [k, v] of Object.entries(rec)) {
+      if (STD.has(k)) continue;
+      bits.push(`${A.esc(k)}=${A.esc(typeof v === "object" ? JSON.stringify(v) : v)}`);
+    }
+    return bits.length ? `<span class="lextra">${bits.join(" ")}</span>` : "";
+  }
+
+  function render(d) {
+    const el = document.getElementById("logList");
+    const items = (d && d.lines) || [];
+    document.getElementById("logStats").textContent = `${items.length} lines`;
+    if (!items.length) { el.innerHTML = '<div class="empty">No log lines.</div>'; return; }
+    el.innerHTML = items.map((r) => {
+      const lvl = String(r.level || "RAW").toUpperCase();
+      const ts = (r.ts || "").replace("T", " ").slice(11, 19);
+      return `<div class="logline">
+        <span class="lts">${A.esc(ts)}</span>
+        <span class="lvl ${A.esc(lvl)}">${A.esc(lvl)}</span>
+        <span class="lmsg"><b>${A.esc(r.msg || "")}</b>
+          ${r.logger ? `<span class="muted"> · ${A.esc(r.logger)}</span>` : ""}
+          ${extras(r)}
+          ${r.exc ? `<pre class="llm-pre" style="color:var(--red)">${A.esc(r.exc)}</pre>` : ""}
+        </span>
+      </div>`;
+    }).join("");
+  }
+
+  function load() {
+    const lvl = document.getElementById("fLevel").value;
+    const lim = document.getElementById("fLimit").value;
+    const q = document.getElementById("fQ").value.trim();
+    let url = `/api/logs/app?limit=${lim}`;
+    if (lvl) url += `&level=${lvl}`;
+    if (q) url += `&q=${encodeURIComponent(q)}`;
+    A.fetchJSON(url).then(render).catch(() => {});
+  }
+
+  document.getElementById("fRefresh").addEventListener("click", load);
+  ["fLevel", "fLimit"].forEach((id) =>
+    document.getElementById(id).addEventListener("change", load));
+  let qt = null;
+  document.getElementById("fQ").addEventListener("input", () => {
+    clearTimeout(qt); qt = setTimeout(load, 300);
+  });
+  setInterval(() => { if (document.getElementById("fAuto").checked) load(); }, 5000);
+  load();
+})();
 </script>
 {% endblock %}

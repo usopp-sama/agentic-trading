@@ -1,22 +1,48 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="modern" data-variant="dark" data-motion="full">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Overview{% endblock %} · Agentic Trading</title>
   <link rel="stylesheet" href="/static/app.css">
+  <!-- PWA (QA-11): installable over LAN/VPN -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#0c1118">
+  <link rel="apple-touch-icon" href="/static/icon.svg">
+  <!-- theme engine runs before paint so the chosen theme/variant applies with no flash -->
+  <script src="/static/themes.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () =>
+        navigator.serviceWorker.register("/sw.js").catch(() => {}));
+    }
+  </script>
 </head>
 <body>
   <header>
     <h1>⚡ ATS</h1>
     <nav>
-      <a href="/"         class="{{ 'active' if active=='overview' else '' }}">Overview</a>
-      <a href="/pipeline" class="{{ 'active' if active=='pipeline' else '' }}">Pipeline</a>
-      <a href="/agents"   class="{{ 'active' if active=='agents'   else '' }}">Agents</a>
-      <a href="/news"     class="{{ 'active' if active=='news'     else '' }}">News</a>
-      <a href="/logs"     class="{{ 'active' if active=='logs'     else '' }}">Logs</a>
+      <a href="/control"       class="{{ 'active' if active=='control'       else '' }}">Control</a>
+      <a href="/"              class="{{ 'active' if active=='today'         else '' }}">Today</a>
+      <a href="/opportunities" class="{{ 'active' if active=='opportunities' else '' }}">Opportunities</a>
+      <a href="/strategies"    class="{{ 'active' if active=='strategies'    else '' }}">Strategies</a>
+      <a href="/screener"      class="{{ 'active' if active=='screener'      else '' }}">Screener</a>
+      <a href="/league"        class="{{ 'active' if active=='league'        else '' }}">League</a>
+      <a href="/research"      class="{{ 'active' if active=='research'      else '' }}">Research</a>
+      <a href="/loops"         class="{{ 'active' if active=='loops'         else '' }}">Loops</a>
+      <a href="/charts"        class="{{ 'active' if active=='charts'        else '' }}">Charts</a>
+      <a href="/portfolio"     class="{{ 'active' if active=='portfolio'     else '' }}">Portfolio</a>
+      <a href="/activity"      class="{{ 'active' if active=='activity'      else '' }}">Activity</a>
+      <a href="/news"          class="{{ 'active' if active=='news'          else '' }}">News</a>
+      <a href="/experts"       class="{{ 'active' if active=='experts'       else '' }}">Experts</a>
+      <a href="/llm"           class="{{ 'active' if active=='llm'           else '' }}">LLM</a>
+      <a href="/logs"          class="{{ 'active' if active=='logs'          else '' }}">Logs</a>
+      <a href="/system"        class="{{ 'active' if active=='system'        else '' }}">System</a>
     </nav>
     <span class="spacer"></span>
+    <a href="/loops" title="Three-loop status — click for detail" style="text-decoration:none">
+      <span class="pill gray" id="hdrLoopF">F</span><span class="pill gray" id="hdrLoopM">M</span><span class="pill gray" id="hdrLoopS">S</span>
+    </a>
     <span class="pill gray" id="hdrData">–</span>
     <span class="muted">equity</span><b id="hdrEquity">–</b>
     <span class="pill gray" id="hdrMoney">–</span>
@@ -28,11 +54,49 @@
     <button id="killBtn" class="danger">Kill</button>
     <span class="pill gray" id="hdrKill">–</span>
     <span class="wsdot" id="wsdot" title="live connection"></span>
+
+    <div class="appearance">
+      <button class="icon-btn" id="alertsBtn" title="Alerts">🔔<span class="badge" id="alertsBadge"></span></button>
+      <div class="popover" id="alertsPop" style="width:300px">
+        <div class="row-between"><h4 style="margin:0">Alerts</h4><button class="icon-btn" id="alertsClear" title="Clear all">🗑</button></div>
+        <div id="alertsList"><div class="empty">No alerts yet.</div></div>
+      </div>
+    </div>
+
+    <div class="appearance">
+      <button class="icon-btn" id="paletteBtn" title="Appearance & theme" aria-haspopup="true">🎨</button>
+      <div class="popover" id="palettePop">
+        <div class="grp">
+          <h4>Theme</h4>
+          <div class="seg" id="segTheme">
+            <button data-theme="modern">Modern</button>
+            <button data-theme="nightdesk">Nightdesk</button>
+            <button data-theme="liquidglass">Liquid Glass</button>
+            <button data-theme="minecraft">Minecraft</button>
+          </div>
+        </div>
+        <div class="grp" id="grpVariant">
+          <h4>Appearance</h4>
+          <div class="seg" id="segVariant">
+            <button data-variant="dark">Dark</button>
+            <button data-variant="light">Light</button>
+          </div>
+        </div>
+        <div class="grp">
+          <h4>Motion</h4>
+          <div class="seg" id="segMotion">
+            <button data-motion="full">Fluid</button>
+            <button data-motion="reduced">Calm</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </header>
 
   {% block content %}{% endblock %}
 
   <div id="toasts"></div>
+  <div id="explainPop" class="explain-pop"></div>
   <script src="/static/app.js"></script>
   {% block script %}{% endblock %}
 </body>

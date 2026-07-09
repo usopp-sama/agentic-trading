@@ -1,0 +1,107 @@
+/* Minecraft theme — original pixel/voxel-inspired styling (no Mojang assets).
+ * Activated by [data-theme="minecraft"] on <html>. Overrides the tokens from
+ * app.css and adds a blocky, beveled, inventory-slot look. Fonts are vendored
+ * OFL pixel fonts (Press Start 2P for headings, VT323 for body). */
+
+@font-face {
+  font-family: "PressStart";
+  src: url("/static/fonts/press-start-2p.woff2") format("woff2");
+  font-display: swap;
+}
+@font-face {
+  font-family: "VT323";
+  src: url("/static/fonts/vt323.woff2") format("woff2");
+  font-display: swap;
+}
+
+[data-theme="minecraft"] {
+  /* Meadow biome: bright grass green, sunlit, not brown/olive */
+  --bg:#5aa544; --panel:#5d6f4d; --panel2:#6a7d59; --elev:#76895f;
+  --text:#f3f7e6; --muted:#cfe0b0; --border:#2f4a22;
+  --accent:#86d94e; --accent2:#bfe86a; --accent-ink:#143a08;   /* meadow grass + tall grass */
+  --green:#86d94e; --red:#e7574a; --amber:#f1c40f; --blue:#5cc0f0; --purple:#b07be0;
+  --radius:0px; --radius-sm:0px;
+  --font:"VT323", ui-monospace, monospace;
+  --font-display:"PressStart", "VT323", monospace;
+  --shadow:4px 4px 0 rgba(0,0,0,.30);
+  --shadow-sm:3px 3px 0 rgba(0,0,0,.26);
+  color-scheme:dark;
+}
+
+/* a sunlit meadow backdrop built from gradients, not images */
+[data-theme="minecraft"] body{
+  font-size:19px; line-height:1.35;
+  background:
+    repeating-linear-gradient(0deg, rgba(0,0,0,.05) 0 31px, rgba(255,255,255,.03) 31px 32px),
+    repeating-linear-gradient(90deg, rgba(0,0,0,.05) 0 31px, rgba(255,255,255,.03) 31px 32px),
+    linear-gradient(180deg, #8fd06a 0%, #69b84d 42%, #4e9a3a 100%);
+  image-rendering:pixelated;
+  cursor:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect x="7" y="2" width="2" height="12" fill="white" stroke="black"/><rect x="2" y="7" width="12" height="2" fill="white" stroke="black"/></svg>') 8 8, crosshair;
+}
+
+/* pixel headings */
+[data-theme="minecraft"] header h1,
+[data-theme="minecraft"] .card h2,
+[data-theme="minecraft"] .big,
+[data-theme="minecraft"] .metric .val,
+[data-theme="minecraft"] .opp .sym,
+[data-theme="minecraft"] .reader h2{
+  font-family:var(--font-display); text-transform:uppercase; letter-spacing:0;
+}
+[data-theme="minecraft"] .card h2{font-size:10px}
+[data-theme="minecraft"] .metric .val,[data-theme="minecraft"] .big{font-size:18px}
+[data-theme="minecraft"] header h1{font-size:13px}
+[data-theme="minecraft"] .opp .sym{font-size:13px}
+
+/* header = a stone bar */
+[data-theme="minecraft"] header{
+  background:linear-gradient(180deg,#4a4a4a,#3b3b3b);
+  border-bottom:3px solid var(--border);
+  box-shadow:inset 0 2px 0 rgba(255,255,255,.1), inset 0 -2px 0 rgba(0,0,0,.4);
+}
+
+/* nav = a hotbar of inventory slots */
+[data-theme="minecraft"] nav a{
+  border:3px solid var(--border); background:#5a5a5a;
+  box-shadow:inset 2px 2px 0 rgba(255,255,255,.18), inset -2px -2px 0 rgba(0,0,0,.45);
+  color:var(--text); padding:6px 10px;
+}
+[data-theme="minecraft"] nav a.active{background:#6d6d6d;color:var(--accent);box-shadow:inset 0 0 0 2px var(--accent), inset 2px 2px 0 rgba(255,255,255,.18), inset -2px -2px 0 rgba(0,0,0,.45)}
+
+/* cards = inventory slots with bevel */
+[data-theme="minecraft"] .card{
+  border:3px solid var(--border);
+  box-shadow:inset 2px 2px 0 rgba(255,255,255,.10), inset -2px -2px 0 rgba(0,0,0,.45), var(--shadow);
+}
+[data-theme="minecraft"] .card:hover{transform:translate(-1px,-1px)}
+
+/* buttons = beveled blocks that press in */
+[data-theme="minecraft"] button,[data-theme="minecraft"] .icon-btn,[data-theme="minecraft"] select,
+[data-theme="minecraft"] .charttools input{
+  border:3px solid var(--border); background:#6d6d6d; color:var(--text);
+  box-shadow:inset 2px 2px 0 rgba(255,255,255,.2), inset -2px -2px 0 rgba(0,0,0,.45);
+  font-family:var(--font); font-size:16px;
+}
+[data-theme="minecraft"] button:hover{background:#7a7a7a}
+[data-theme="minecraft"] button:active{box-shadow:inset -2px -2px 0 rgba(255,255,255,.2), inset 2px 2px 0 rgba(0,0,0,.45);transform:translate(1px,1px)}
+[data-theme="minecraft"] button.primary{background:var(--accent);color:var(--accent-ink)}
+
+/* pills / chips become square plates */
+[data-theme="minecraft"] .pill,[data-theme="minecraft"] .conv,[data-theme="minecraft"] .side,
+[data-theme="minecraft"] .status,[data-theme="minecraft"] .tag{
+  border-radius:0;border:2px solid var(--border)}
+
+/* score bar = discrete blocks (like an XP/health bar) */
+[data-theme="minecraft"] .score-bar{height:10px;border:2px solid var(--border);background:#2b2b2b}
+[data-theme="minecraft"] .score-bar>i{background:repeating-linear-gradient(90deg,var(--accent) 0 8px,transparent 8px 10px)}
+
+/* slide-over reader = a chest panel */
+[data-theme="minecraft"] .reader,[data-theme="minecraft"] .popover{
+  border:3px solid var(--border);
+  box-shadow:inset 2px 2px 0 rgba(255,255,255,.08), inset -2px -2px 0 rgba(0,0,0,.5), var(--shadow)}
+
+/* toasts pop in like item pickups */
+[data-theme="minecraft"] .toast{border-radius:0;border:3px solid var(--border);
+  box-shadow:inset 2px 2px 0 rgba(255,255,255,.12), inset -2px -2px 0 rgba(0,0,0,.5)}
+
+[data-theme="minecraft"] table th{font-family:var(--font-display);font-size:9px;text-transform:uppercase}

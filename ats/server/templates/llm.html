@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}LLM{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="card span12 reveal">
+    <h2>LLM query history</h2>
+    <p class="sub">Every question sent to the Gemini model and its answer — SME opinions, CIO/console chats, and startup health probes. Newest first.</p>
+    <div class="llm-controls">
+      <label>Type
+        <select id="fKind">
+          <option value="">All</option>
+          <option value="opinion">Opinion</option>
+          <option value="chat">Chat</option>
+          <option value="health">Health</option>
+        </select>
+      </label>
+      <label>Status
+        <select id="fOk">
+          <option value="">All</option>
+          <option value="true">OK</option>
+          <option value="false">Errors</option>
+        </select>
+      </label>
+      <label>Show
+        <select id="fLimit">
+          <option>50</option>
+          <option selected>100</option>
+          <option>200</option>
+          <option>500</option>
+        </select>
+      </label>
+      <label class="chk"><input type="checkbox" id="fAuto" checked> Auto-refresh</label>
+      <button id="fRefresh">Refresh</button>
+      <span class="spacer"></span>
+      <span class="muted" id="llmStats"></span>
+    </div>
+    <p class="sub" id="llmUsage" style="margin-top:8px" title="Estimate from recorded tokens; Google billing is authoritative">Loading usage…</p>
+  </div>
+
+  <div class="card span12 reveal">
+    <div id="llmList"><div class="empty">No LLM calls recorded yet.</div></div>
+  </div>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+(function () {
+  const A = window.ATS;
+
+  function kindPill(k) {
+    const c = k === "opinion" ? "blue" : k === "health" ? "gray" : "accent";
+    return `<span class="pill ${c}">${A.esc(k || "chat")}</span>`;
+  }
+  function okPill(c) {
+    return c.ok
+      ? `<span class="pill green">ok · ${A.esc(c.latency_ms)}ms</span>`
+      : `<span class="pill red">ERROR</span>`;
+  }
+  function tokens(c) {
+    const p = c.prompt_tokens || 0, o = c.completion_tokens || 0;
+    return (p || o) ? `<span class="muted">${p}→${o} tok</span>` : "";
+  }
+  function who(c) {
+    const bits = [];
+    if (c.persona) bits.push(A.esc(c.persona));
+    if (c.symbol) bits.push(A.esc(c.symbol));
+    return bits.length ? `<span class="muted">${bits.join(" · ")}</span>` : "";
+  }
+
+  // Re-rendering the whole list on every 5s auto-refresh used to collapse and
+  // scroll-reset whatever row you were reading. Guard against that: skip the
+  // DOM rebuild entirely when nothing changed, and when it must rebuild,
+  // preserve which rows you had expanded.
+  let lastSig = null;
+
+  function keyOf(c) {
+    return `${c.ts || ""}|${c.kind || ""}|${c.persona || ""}|${c.symbol || ""}`;
+  }
+  function sigOf(items, st) {
+    return JSON.stringify([
+      items.length,
+      (items[0] || {}).ts || "",
+      (items[items.length - 1] || {}).ts || "",
+      st.errors || 0,
+    ]);
+  }
+
+  function render(d) {
+    const el = document.getElementById("llmList");
+    const items = (d && d.calls) || [];
+    const st = (d && d.stats) || {};
+    document.getElementById("llmStats").textContent =
+      `${st.shown || 0} shown · ${st.errors || 0} errors · ${(st.prompt_tokens || 0)}+${(st.completion_tokens || 0)} tokens`;
+
+    const sig = sigOf(items, st);
+    if (sig === lastSig) return;  // unchanged → leave the row you're reading alone
+
+    // Remember which rows were open so the rebuild doesn't collapse them.
+    const openKeys = new Set(
+      Array.from(el.querySelectorAll("details.act[open]")).map((n) => n.dataset.key)
+    );
+    const hadOpen = openKeys.size > 0;
+    lastSig = sig;
+
+    if (!items.length) { el.innerHTML = '<div class="empty">No LLM calls recorded yet.</div>'; return; }
+    el.innerHTML = items.map((c, i) => {
+      const key = keyOf(c);
+      const open = hadOpen ? openKeys.has(key) : (i === 0);
+      return `<details class="act" data-key="${A.esc(key)}" ${open ? "open" : ""}>
+      <summary>
+        ${kindPill(c.kind)} ${okPill(c)}
+        <b>${A.esc(c.model || "")}</b>
+        ${who(c)} ${tokens(c)}
+        <span class="spacer"></span>
+        <span class="muted" title="${A.esc((c.ts || '').replace('T', ' ').slice(0, 19))}">${A.ago(c.ts)} ago</span>
+      </summary>
+      <div class="act-body">
+        ${c.error ? `<p class="rationale" style="color:var(--red)">${A.esc(c.error)}</p>` : ""}
+        <h4>Prompt</h4>
+        <pre class="llm-pre">${A.esc(c.prompt || "")}</pre>
+        <h4>Response</h4>
+        <pre class="llm-pre">${A.esc(c.response || "(no response)")}</pre>
+      </div>
+    </details>`;
+    }).join("");
+  }
+
+  function renderUsage(u) {
+    if (!u) return;
+    const el = document.getElementById("llmUsage");
+    const models = (u.by_model || [])
+      .map((m) => `${A.esc(m.model)} ${m.calls}× ($${(m.est_usd || 0).toFixed(4)})`)
+      .join(" · ");
+    el.innerHTML =
+      `<b>Estimated spend (recorded):</b> $${(u.est_usd || 0).toFixed(4)} ` +
+      `(≈ ₹${(u.est_inr || 0).toFixed(2)}) · ${u.ok_calls || 0} billable calls, ` +
+      `${u.failed_calls || 0} failed (unbilled) · ` +
+      `${(u.input_tokens || 0).toLocaleString()} in / ${(u.output_tokens || 0).toLocaleString()} out tokens` +
+      (models ? `<br><span class="muted">${models}</span>` : "") +
+      `<br><span class="muted">Recorded since the call logger was enabled — Google's billing console is authoritative.</span>`;
+  }
+
+  function load() {
+    const k = document.getElementById("fKind").value;
+    const ok = document.getElementById("fOk").value;
+    const lim = document.getElementById("fLimit").value;
+    let url = `/api/llm/calls?limit=${lim}`;
+    if (k) url += `&kind=${k}`;
+    if (ok) url += `&ok=${ok}`;
+    A.fetchJSON(url).then(render).catch(() => {});
+    A.fetchJSON("/api/llm/usage").then(renderUsage).catch(() => {});
+  }
+
+  // Explicit user actions should always rebuild (different filter / manual
+  // refresh), so drop the change-guard before reloading.
+  function reload() { lastSig = null; load(); }
+
+  document.getElementById("fRefresh").addEventListener("click", reload);
+  ["fKind", "fOk", "fLimit"].forEach((id) =>
+    document.getElementById(id).addEventListener("change", reload));
+  setInterval(() => { if (document.getElementById("fAuto").checked) load(); }, 5000);
+  A.on("snapshot", () => { if (document.getElementById("fAuto").checked) load(); });
+  load();
+})();
+</script>
+{% endblock %}

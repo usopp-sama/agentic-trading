@@ -1,0 +1,123 @@
+# Knowledge source manifest for scripts/download_sources.py
+#
+# This drives a *legitimate* downloader: it fetches ONLY the public,
+# free-to-redistribute material listed here into library/<family>/, ready for
+# scripts/ingest_knowledge.py. It deliberately does NOT include copyrighted
+# books — per docs/sme_knowledge_base.md §4.8, books are read and distilled into
+# your own notes, never bulk-downloaded.
+#
+# Each source:
+#   name:        human label (also the output filename, slugified)
+#   family:      A | B | C | RISK | all   (decides the library/ sub-folder)
+#   url:         direct file URL (mode: file) OR a page to scan (mode: page)
+#   reliability: 0-100, carried into ingestion (official > generic). Optional.
+#   mode:        "file" (default) downloads the URL; "page" scans an HTML page
+#                for same-domain document links (pdf/docx/xls/xlsx/csv by
+#                default) and downloads them. Page mode reads only that one page
+#                (no crawling) and ignores JS-rendered link lists.
+#   enabled:     set false to keep an entry as a documented TODO (skipped).
+#
+# Add your own vetted URLs over time. Only http/https are allowed; the script
+# respects robots.txt, rate-limits, and skips files already present.
+
+settings:
+  user_agent: "ats-knowledge-downloader/1.0 (+local research; respects robots.txt)"
+  rate_limit_s: 2.0          # polite pause between requests
+  timeout_s: 30.0
+  respect_robots: true
+  max_file_mb: 100           # abort a single download past this size
+  max_page_links: 25         # cap docs pulled from one mode:page source
+  # Document types mode:page collects. Override to narrow/broaden, e.g. [pdf].
+  document_exts: [pdf, docx, doc, xls, xlsx, csv]
+
+sources:
+  # ----------------------------------------------------------------------- #
+  # Family A — open-access factor / strategy papers (free author/uni copies) #
+  # ----------------------------------------------------------------------- #
+  - name: Jegadeesh & Titman 1993 - Returns to Buying Winners and Selling Losers
+    family: A
+    reliability: 92
+    url: https://www.bauer.uh.edu/rsusmel/phd/jegadeesh-titman93.pdf
+
+  - name: Gatev Goetzmann Rouwenhorst 2006 - Pairs Trading
+    family: A
+    reliability: 92
+    url: http://stat.wharton.upenn.edu/~steele/Courses/434/434Context/PairsTrading/PairsTradingGGR.pdf
+
+  - name: Frazzini & Pedersen 2014 - Betting Against Beta
+    family: A
+    reliability: 92
+    url: https://pages.stern.nyu.edu/~lpederse/papers/BettingAgainstBeta.pdf
+
+  - name: Carr & Wu 2009 - Variance Risk Premiums
+    family: A
+    reliability: 92
+    url: https://engineering.nyu.edu/sites/default/files/2019-01/CarrReviewofFinStudiesMarch2009-a.pdf
+
+  # --- TODO: paywalled / no stable free PDF — paste a free copy if you find one
+  - name: Moskowitz Ooi Pedersen 2012 - Time Series Momentum
+    family: A
+    reliability: 92
+    url: ""            # ScienceDirect is paywalled; AQR hosts a free version — add it
+    enabled: false
+
+  - name: George & Hwang 2004 - The 52-Week High and Momentum Investing
+    family: A
+    reliability: 92
+    url: ""            # Wiley paywall — add a free working-paper PDF if available
+    enabled: false
+
+  - name: Bernard & Thomas 1989 - Post-Earnings-Announcement Drift
+    family: A
+    reliability: 92
+    url: ""            # JSTOR paywall — add a free copy if available
+    enabled: false
+
+  # ----------------------------------------------------------------------- #
+  # Family B — Indian macro primary sources (official, free, full-text OK)   #
+  # These are landing pages; paste the exact PDF URL you want, or set        #
+  # mode: page to let the script scan that page for PDF links.               #
+  # ----------------------------------------------------------------------- #
+  - name: RBI Monetary Policy Report
+    family: B
+    reliability: 96
+    url: ""            # TODO: https://www.rbi.org.in -> Publications -> Monetary Policy Report (PDF)
+    enabled: false
+
+  - name: RBI Financial Stability Report
+    family: B
+    reliability: 96
+    url: ""            # TODO: rbi.org.in publication PDF
+    enabled: false
+
+  - name: Economic Survey of India (latest)
+    family: B
+    reliability: 96
+    url: ""            # TODO: https://www.indiabudget.gov.in/economicsurvey/ (volume PDFs)
+    enabled: false
+
+  - name: Union Budget - Budget at a Glance
+    family: B
+    reliability: 96
+    url: ""            # TODO: https://www.indiabudget.gov.in/ (PDF)
+    enabled: false
+
+  - name: SEBI Annual Report
+    family: B
+    reliability: 95
+    url: ""            # TODO: https://www.sebi.gov.in/ -> Reports -> Annual Report (PDF)
+    enabled: false
+
+  # ----------------------------------------------------------------------- #
+  # Family C — instruments (ETF/MF official docs)                            #
+  # ----------------------------------------------------------------------- #
+  - name: SEBI Mutual Fund Categorization Circular 2017
+    family: C
+    reliability: 95
+    url: ""            # TODO: sebi.gov.in legal/circulars Oct 2017 categorization (PDF)
+    enabled: false
+
+  # ----------------------------------------------------------------------- #
+  # RISK — open references                                                   #
+  # ----------------------------------------------------------------------- #
+  # (Add open-access risk/position-sizing papers here as you vet them.)

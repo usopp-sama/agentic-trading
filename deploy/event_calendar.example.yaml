@@ -1,0 +1,22 @@
+# Event-risk veto calendar — copy to var/event_calendar.yaml and maintain.
+# (Or point ATS_EVENT_CALENDAR_PATH somewhere else.)
+#
+# Semantics: a `global` event on a date vetoes NEW entries in every name that
+# day; a symbol event vetoes that name within ±1 day. Exits always pass.
+# F&O monthly expiry (last Thursday) is computed automatically — it does not
+# belong in this file.
+#
+# DATES BELOW ARE PLACEHOLDERS — check the RBI calendar and exchange notices
+# and fill in the real ones. The fundamentals research agent will keep
+# earnings dates updated once WS-4 lands; until then they are maintained here.
+
+global:
+  - {date: 2026-08-06, kind: rbi_mpc, note: "EXAMPLE - verify against RBI schedule"}
+  - {date: 2027-02-01, kind: union_budget, note: "Union Budget day"}
+  # - {date: 2026-09-25, kind: index_rebalance, note: "NIFTY rebalance effective"}
+
+symbols:
+  RELIANCE.NS:
+    - {date: 2026-07-17, kind: earnings, note: "EXAMPLE - Q1 FY27 results, verify"}
+  TCS.NS:
+    - {date: 2026-07-09, kind: earnings, note: "EXAMPLE - Q1 FY27 results, verify"}

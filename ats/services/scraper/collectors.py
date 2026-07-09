@@ -115,16 +115,33 @@ class RssCollector:
 class MarketauxCollector:  # pragma: no cover - requires API key + network
     name = "marketaux"
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, min_interval_s: float = 1200.0) -> None:
         self._key = api_key
+        # Free tier is 100 requests/day; throttle so the ~288 daily news polls
+        # don't blow the quota. RSS still runs every poll.
+        self._min_interval = max(0.0, float(min_interval_s))
+        self._last_call: float | None = None
 
     def collect(self) -> list[dict]:
+        import time
+
         import httpx
+
+        now = time.monotonic()
+        if self._last_call is not None and (now - self._last_call) < self._min_interval:
+            return []  # throttled to stay under the free-tier daily cap
+        self._last_call = now
 
         try:
             resp = httpx.get(
                 "https://api.marketaux.com/v1/news/all",
-                params={"countries": "in", "filter_entities": "true", "language": "en", "api_token": self._key},
+                params={
+                    "countries": "in",
+                    "filter_entities": "true",
+                    "language": "en",
+                    "limit": 3,  # free tier caps at 3 articles/request anyway
+                    "api_token": self._key,
+                },
                 timeout=15.0,
             )
             resp.raise_for_status()

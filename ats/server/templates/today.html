@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}Today{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="card span12 brief-hero reveal">
+    <div class="row-between">
+      <h2 style="margin:0">Today's brief</h2>
+      <button id="briefRefresh" title="Regenerate">↻ Refresh</button>
+    </div>
+    <p class="lead" id="briefText">Reading the market…</p>
+    <div class="by"><span class="chip-llm" id="briefBy">grounded summary</span></div>
+  </div>
+
+  <div class="card span8 reveal">
+    <h2>Top opportunities</h2>
+    <p class="sub">What the always-on algorithms are leaning into right now</p>
+    <div class="opp-grid" id="topOpps"><div class="empty">Scanning…</div></div>
+  </div>
+
+  <div class="card span4 reveal">
+    <h2>Portfolio</h2>
+    <div class="metric" style="margin:8px 0 14px">
+      <span class="lbl">Equity</span>
+      <span class="val" id="pfEquity">–</span>
+    </div>
+    <div style="display:flex;gap:18px">
+      <div class="metric"><span class="lbl">Unrealized</span><b id="pfUnreal">–</b></div>
+      <div class="metric"><span class="lbl">Realized</span><b id="pfReal">–</b></div>
+    </div>
+    <div class="muted" id="pfRegime" style="margin-top:12px;font-size:12px"></div>
+  </div>
+
+  <div class="card span6 reveal">
+    <h2>Watchlist news</h2>
+    <div class="newslist" id="watchNews"><div class="empty">No fresh news on your holdings.</div></div>
+  </div>
+
+  <div class="card span6 reveal">
+    <h2>What changed</h2>
+    <p class="sub">Latest decisions the desk made</p>
+    <div id="changed"><div class="empty">Nothing yet.</div></div>
+  </div>
+
+  <div class="card span12 reveal">
+    <h2>Movers</h2>
+    <p class="sub">Volume-confirmed movers only — a move counts when volume clears 1.5× its 20-day average</p>
+    <div id="movers" style="display:flex;gap:24px;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px"><h3 class="muted" style="font-size:12px">Gainers</h3><div id="mvGain"><div class="empty">–</div></div></div>
+      <div style="flex:1;min-width:200px"><h3 class="muted" style="font-size:12px">Losers</h3><div id="mvLose"><div class="empty">–</div></div></div>
+      <div style="flex:1;min-width:200px"><h3 class="muted" style="font-size:12px">Volume-confirmed</h3><div id="mvVol"><div class="empty">–</div></div></div>
+    </div>
+  </div>
+
+  <div class="card span12 reveal">
+    <h2>Daily digest</h2>
+    <p class="sub">Scroll back through how each day closed</p>
+    <div id="digest"><div class="empty">No history yet.</div></div>
+  </div>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+(function () {
+  const A = window.ATS;
+  async function loadBrief(refresh) {
+    const b = await A.fetchJSON("/api/brief" + (refresh ? "?refresh=true" : ""));
+    document.getElementById("briefText").textContent = b.brief || "—";
+    const by = document.getElementById("briefBy");
+    by.textContent = b.real ? "AI brief" : "grounded summary";
+    by.className = "chip-llm" + (b.real ? " real" : "");
+  }
+  document.getElementById("briefRefresh").onclick = () => loadBrief(true);
+
+  function renderOpps(list) {
+    const el = document.getElementById("topOpps");
+    if (!list || !list.length) { el.innerHTML = '<div class="empty">No high-conviction setups right now.</div>'; return; }
+    el.innerHTML = list.slice(0, 4).map(A.oppCard).join("");
+    el.querySelectorAll(".opp").forEach((c) =>
+      c.onclick = () => location.href = "/opportunities#" + c.dataset.symbol);
+  }
+  function renderNews(items) {
+    const el = document.getElementById("watchNews");
+    if (!items || !items.length) { el.innerHTML = '<div class="empty">No fresh news on your holdings.</div>'; return; }
+    el.innerHTML = items.slice(0, 6).map((n) => {
+      const s = (n.sentiment && n.sentiment.label) || "neutral";
+      return `<div class="newsrow"><span class="sdot ${s}"></span><div>
+        <div class="ttl">${A.esc(n.title)}</div>
+        <div class="sub">${A.esc(n.source)} · ${(n.watch || n.tickers || []).map(A.esc).join(", ")} · ${A.ago(n.ts)} ago</div>
+      </div></div>`;
+    }).join("");
+  }
+  function renderChanged(decisions) {
+    const el = document.getElementById("changed");
+    if (!decisions || !decisions.length) { el.innerHTML = '<div class="empty">Nothing yet.</div>'; return; }
+    el.innerHTML = decisions.slice(0, 6).map((d) =>
+      `<div class="newsrow" style="cursor:default"><div>
+        <div class="ttl">${A.esc(d.action)} ${A.esc(d.symbol)} <span class="status ${(d.status||'').toLowerCase().indexOf('fill')>=0?'acted':'proposed'}">${A.esc(d.status)}</span></div>
+        <div class="sub">${A.esc((d.rationale||'').slice(0,110))} · ${A.ago(d.ts)} ago</div>
+      </div></div>`).join("");
+  }
+
+  function onSnap(s) {
+    if (!s) return;
+    const pf = s.portfolio || {};
+    A.countUp(document.getElementById("pfEquity"), pf.equity || 0, { money: true });
+    const u = document.getElementById("pfUnreal"); u.textContent = A.fmtMoney(pf.unrealized_pnl||0); u.className = A.signClass(pf.unrealized_pnl);
+    const r = document.getElementById("pfReal"); r.textContent = A.fmtMoney(pf.realized_pnl||0); r.className = A.signClass(pf.realized_pnl);
+    document.getElementById("pfRegime").textContent = "Regime: " + ((s.state||{}).regime || "—");
+    renderOpps(s.opportunities);
+    renderNews(s.watchlist_news);
+    renderChanged(s.decisions);
+  }
+  function renderDigest(days) {
+    const el = document.getElementById("digest");
+    if (!days || !days.length) { el.innerHTML = '<div class="empty">No history yet — check back after a trading day closes.</div>'; return; }
+    el.innerHTML = days.map((d) => {
+      const pnl = d.net != null ? d.net : 0;
+      return `<div class="digest-day"><span class="d">${A.esc(d.day)}</span>
+        <span class="${A.signClass(pnl)}" style="margin-left:10px">${A.fmtMoney(pnl)}</span>
+        <span class="muted" style="margin-left:10px">${A.esc(d.summary || "")}</span></div>`;
+    }).join("");
+  }
+
+  function renderMovers(m) {
+    m = m || {};
+    const row = (e) => `<div class="newsrow" style="cursor:pointer;padding:6px 4px"
+        onclick="location.href='/charts?symbol=${encodeURIComponent(e.symbol)}'">
+        <div><div class="ttl">${A.esc(e.symbol)}
+        <span class="${e.pct_change>=0?'up':'down'}">${e.pct_change>=0?'+':''}${(e.pct_change).toFixed(2)}%</span></div>
+        <div class="sub">${e.volume_x!=null?(e.volume_x+'× vol'):''}</div></div></div>`;
+    const put = (id, arr) => {
+      const el = document.getElementById(id);
+      el.innerHTML = (arr && arr.length) ? arr.slice(0, 6).map(row).join("") : '<div class="empty">–</div>';
+    };
+    put("mvGain", m.gainers); put("mvLose", m.losers); put("mvVol", m.volume_confirmed);
+  }
+
+  A.on("snapshot", onSnap);
+  loadBrief(false);
+  A.fetchJSON("/api/dashboard").then(onSnap).catch(() => {});
+  A.fetchJSON("/api/opportunities?limit=6").then((d) => renderOpps(d.opportunities)).catch(() => {});
+  A.fetchJSON("/api/digest?days=14").then((d) => renderDigest(d.digest)).catch(() => {});
+  A.fetchJSON("/api/movers").then(renderMovers).catch(() => {});
+})();
+</script>
+{% endblock %}

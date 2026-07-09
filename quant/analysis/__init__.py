@@ -1,6 +1,15 @@
 """Technical and fundamental analysis."""
 
-from quant.analysis import indicators, screener, valuation
+from quant.analysis import (
+    indicators,
+    intraday,
+    levels,
+    patterns,
+    quality,
+    screener,
+    summary,
+    valuation,
+)
 from quant.analysis.screener import (
     Screener,
     between_filter,
@@ -12,6 +21,11 @@ __all__ = [
     "indicators",
     "valuation",
     "screener",
+    "levels",
+    "patterns",
+    "summary",
+    "intraday",
+    "quality",
     "Screener",
     "min_filter",
     "max_filter",

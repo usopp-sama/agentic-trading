@@ -10,6 +10,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# Instrument types orders may be placed for. Indices are references and
+# COMMODITY rows (COMEX futures) are price feeds for NAV arbitrage — the
+# system holds no account that could trade either.
+TRADEABLE_TYPES = frozenset({"EQ", "ETF"})
+
+
+def is_tradeable(instrument_type: str | None) -> bool:
+    """Whether orders may be placed for this instrument type."""
+    return (instrument_type or "EQ") in TRADEABLE_TYPES
+
 
 @dataclass
 class GuardrailInput:

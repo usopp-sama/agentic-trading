@@ -42,7 +42,7 @@ UNIVERSE: list[tuple[str, str, str, str]] = [
     ("TATACONSUM.NS", "Tata Consumer", "FMCG", "EQ"),
     # Auto
     ("MARUTI.NS", "Maruti Suzuki", "Auto", "EQ"),
-    ("TATAMOTORS.NS", "Tata Motors", "Auto", "EQ"),
+    ("TMPV.NS", "Tata Motors PV", "Auto", "EQ"),
     ("M&M.NS", "Mahindra & Mahindra", "Auto", "EQ"),
     ("BAJAJ-AUTO.NS", "Bajaj Auto", "Auto", "EQ"),
     ("EICHERMOT.NS", "Eicher Motors", "Auto", "EQ"),
@@ -74,14 +74,50 @@ UNIVERSE: list[tuple[str, str, str, str]] = [
     ("SILVERBEES.NS", "Nippon Silver ETF", "Commodity ETF", "ETF"),
     ("GOLDBEES.NS", "Nippon Gold ETF", "Commodity ETF", "ETF"),
     ("NIFTYBEES.NS", "Nippon Nifty ETF", "Index ETF", "ETF"),
+    ("LIQUIDBEES.NS", "Nippon Liquid ETF", "Liquid ETF", "ETF"),
+    # Underlying references for ETF NAV arbitrage. COMMODITY instruments are
+    # price feeds only — the risk layer vetoes any order for them.
+    ("SI=F", "COMEX Silver Futures", "Commodity Futures", "COMMODITY"),
+    ("GC=F", "COMEX Gold Futures", "Commodity Futures", "COMMODITY"),
 ]
 
 
 # Strategy registry: (id, name, type, status)
 STRATEGIES: list[tuple[str, str, str, str]] = [
+    # The core ballast (plan §2): regime-aware ETF allocation. Paper from
+    # day 1 by design — it is the medium loop's primary earner, not an alpha
+    # experiment awaiting a gate.
+    ("core_allocation", "Core Allocation (regime-aware ETF ballast)", "allocation", "paper"),
     ("sma_crossover", "SMA 20/50 Crossover", "trend", "paper"),
     ("mean_reversion", "Bollinger Mean Reversion", "mean_reversion", "paper"),
     ("volume_breakout", "Volume Breakout", "momentum", "shadow"),
+    ("donchian_trend", "Donchian 55/20 Trend Following", "trend", "paper"),
+    ("rsi2_reversion", "RSI(2) Pullback in Uptrend", "mean_reversion", "paper"),
+    ("ts_momentum", "12-1 Time-Series Momentum", "momentum", "paper"),
+    ("pairs_zscore", "Pairs Z-Score (stat arb)", "stat_arb", "paper"),
+    ("factor_composite", "Momentum + Low-Vol Factor Composite", "factor", "paper"),
+    ("nav_premium", "ETF NAV Premium/Discount Arbitrage", "arbitrage", "paper"),
+    # Phase-2 strategy-library expansion. All start as "shadow": signals are
+    # logged and a virtual track record accrues, but no capital is allocated
+    # until the walk-forward backtest gate promotes them to "paper".
+    ("xs_momentum", "Cross-Sectional 12-1 Momentum", "momentum", "shadow"),
+    ("high_52w", "52-Week-High Momentum", "momentum", "shadow"),
+    ("dual_momentum", "Dual (Absolute + Relative) Momentum", "momentum", "shadow"),
+    ("macd_adx_trend", "MACD Trend + ADX Filter", "trend", "shadow"),
+    ("st_reversal", "Short-Term (1-Week) Reversal", "mean_reversion", "shadow"),
+    ("ou_keltner", "Keltner Z-Score Mean Reversion", "mean_reversion", "shadow"),
+    ("value_factor", "Value (FF) Factor Sleeve", "factor", "shadow"),
+    ("quality_qmj", "Quality (QMJ) Factor Sleeve", "factor", "shadow"),
+    ("size_factor", "Size (Banz) Factor Sleeve", "factor", "shadow"),
+    ("low_vol_bab", "Low-Volatility / Betting-Against-Beta", "factor", "shadow"),
+    ("coint_pairs", "Cointegration Pairs (Engle-Granger)", "stat_arb", "shadow"),
+    ("pead_drift", "Post-Earnings-Announcement Drift", "momentum", "shadow"),
+    ("news_sentiment", "News-Sentiment Momentum", "momentum", "shadow"),
+    ("turn_of_month", "Turn-of-Month Seasonality", "other", "shadow"),
+    ("vol_target", "Volatility-Managed Exposure Overlay", "other", "shadow"),
+    ("vol_premium", "Iron Condor — Variance Risk Premium", "vol", "paper"),
+    # QA-8: analytics-engine confluence sleeve (shadow until the gate promotes it).
+    ("tech_confluence", "Confluence: composite summary + level support", "trend", "shadow"),
 ]
 
 

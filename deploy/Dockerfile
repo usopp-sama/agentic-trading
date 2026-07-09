@@ -2,10 +2,15 @@
 FROM python:3.12-slim AS base
 
 # Security: run as non-root, no bytecode pyc surprises, no buffering.
+# Cache dirs point at /tmp so the container still works with a read-only root
+# filesystem: yfinance writes a timezone cache (XDG_CACHE_HOME) and matplotlib
+# a config dir (MPLCONFIGDIR); /tmp is mounted as a writable tmpfs at runtime.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    NODE_ENV=production
+    NODE_ENV=production \
+    XDG_CACHE_HOME=/tmp/.cache \
+    MPLCONFIGDIR=/tmp/.mpl
 
 WORKDIR /app
 

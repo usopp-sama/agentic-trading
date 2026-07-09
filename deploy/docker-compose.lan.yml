@@ -1,0 +1,54 @@
+# One-command LAN deploy for a single "server laptop" (Windows / macOS / Linux
+# via Docker Desktop). This is the LEAN profile: the app alone on SQLite + an
+# in-memory bus, so there is no Postgres/Redis to manage. The app container is
+# Linux regardless of the host OS, so a Windows host is fine.
+#
+# Run from the REPO ROOT:
+#   docker compose -f deploy/docker-compose.lan.yml up -d --build
+#
+# Reach it from any device on the same Wi-Fi at  http://<server-ip>:8000
+#
+# Create a repo-root .env first (copy deploy/.env.example) with your ATS_LLM_*
+# keys for real SME reasoning. Without it the app still boots in mock mode.
+# Set a long ATS_DASHBOARD_TOKEN in .env if your network isn't fully trusted.
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: agentic-trading:lan
+    restart: unless-stopped
+    # Optional: the app runs (mock mode) even if .env is absent.
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      # SQLite + in-memory bus = zero external services. Data persists in the
+      # app_data volume (DB at /app/var/ats.db, knowledge under /app/var).
+      ATS_DB_URL: "sqlite:////app/var/ats.db"
+      ATS_EVENT_BUS: "memory"
+      ATS_VECTOR_STORE: "memory"
+    # Host bind: 0.0.0.0 = reachable on your LAN (the point of a server laptop);
+    # set ATS_BIND=127.0.0.1 in .env to keep it to this machine only. The
+    # container itself always listens on 0.0.0.0:8000 internally.
+    ports:
+      - "${ATS_BIND:-0.0.0.0}:${ATS_HOST_PORT:-8000}:8000"
+    # --- Hardening (matches the scaled compose) ---
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - app_data:/app/var
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2g
+
+volumes:
+  app_data:

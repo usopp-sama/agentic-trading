@@ -48,8 +48,14 @@ def apply_fill(
     qty: int,
     price: float,
     fees: float,
+    update_cash: bool = True,
 ) -> dict:
-    """Apply a fill to cash + position. Returns the realized PnL delta."""
+    """Apply a fill to cash + position. Returns the realized PnL delta.
+
+    ``update_cash=False`` applies only the position leg — used by callers that
+    manage cash through the AccountLedger (BrokerSim), where settlement has
+    already moved the money and updating it here would double-count.
+    """
     side = side.upper()
     realized_delta = 0.0
     with session_scope() as s:
@@ -74,6 +80,9 @@ def apply_fill(
             pos.qty -= sell_qty
             if pos.qty == 0:
                 pos.avg_price = 0.0
+
+    if not update_cash:
+        return {"realized_delta": round(realized_delta, 2), "cash": get_cash(account)}
 
     cash = get_cash(account)
     if side == "BUY":

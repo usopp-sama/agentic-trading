@@ -21,7 +21,7 @@ from ats.core.events import EventBus, Topic
 from ats.core.logging import get_logger
 from ats.core.models import Decision, Instrument
 from ats.services.risk.allocator import desired_target_qty
-from ats.services.risk.guardrails import GuardrailInput, apply_guardrails
+from ats.services.risk.guardrails import GuardrailInput, apply_guardrails, is_tradeable
 
 log = get_logger("ats.risk")
 
@@ -34,6 +34,7 @@ class RiskService:
         self._md = None
         self._execution = None
         self._sectors: dict[str, str] = {}
+        self._itypes: dict[str, str] = {}
         self._order_times: deque[float] = deque(maxlen=200)
         self._orch = None
 
@@ -43,9 +44,9 @@ class RiskService:
         self._execution = ctx.orchestrator.get("execution")
         self._orch = ctx.orchestrator
         with session_scope() as s:
-            self._sectors = {
-                r.symbol: r.sector for r in s.execute(select(Instrument)).scalars().all()
-            }
+            rows = s.execute(select(Instrument)).scalars().all()
+            self._sectors = {r.symbol: r.sector for r in rows}
+            self._itypes = {r.symbol: r.instrument_type for r in rows}
         ctx.bus.subscribe(Topic.PROPOSAL, self._on_proposal)
 
     async def _on_proposal(self, evt) -> None:
@@ -55,6 +56,11 @@ class RiskService:
         symbol = proposal.get("symbol")
         if not symbol or self._execution is None:
             return {"status": "skipped"}
+
+        # Indices and commodity price feeds are references, never orders.
+        if not is_tradeable(self._itypes.get(symbol)):
+            self._record_decision(proposal, "HOLD", 0, ["not_tradeable"], status="blocked")
+            return {"status": "not_tradeable"}
 
         settings = get_settings()
         price = self._price(symbol)
@@ -82,6 +88,34 @@ class RiskService:
             max_position_pct=settings.max_position_pct,
         )
 
+        # Regime crisis cut: in crisis volatility, scale down any exposure
+        # INCREASE (reductions always pass). Conservative-only by design.
+        regime_applied: list[str] = []
+        regime_svc = self._orch.get("regime") if self._orch else None
+        if regime_svc is not None and regime_svc.is_crisis() and desired > current_qty:
+            desired = current_qty + int(
+                (desired - current_qty) * settings.regime_crisis_scale
+            )
+            regime_applied.append("regime:crisis_scale")
+
+        # Fast-loop protective gates — they block only exposure INCREASES;
+        # exits and risk reductions always pass (plan §1.2/§1.5).
+        if desired > current_qty:
+            from ats.services.execution.reconcile import entries_halted
+
+            if entries_halted():
+                self._record_decision(proposal, "HOLD", 0, ["recon_halt"], status="blocked")
+                log.warning("entry_blocked_recon_halt", extra={"symbol": symbol})
+                return {"status": "blocked", "applied": ["recon_halt"]}
+            event_risk = self._orch.get("event_risk") if self._orch else None
+            if event_risk is not None:
+                vetoes = event_risk.active_vetoes(symbol)
+                if vetoes:
+                    applied = [f"veto:{v}" for v in vetoes]
+                    self._record_decision(proposal, "HOLD", 0, applied, status="vetoed")
+                    log.warning("entry_vetoed", extra={"symbol": symbol, "vetoes": vetoes})
+                    return {"status": "vetoed", "applied": applied}
+
         # Rate limit: reject if too many orders in the last 60s.
         if self._rate_limited(settings.max_orders_per_min):
             self._record_decision(proposal, "HOLD", 0, ["rate_limit"], status="blocked")
@@ -105,6 +139,8 @@ class RiskService:
         if result.kill and not state.is_killed():
             state.engage_kill_switch(actor="risk_manager", reason="daily_loss_limit breached")
 
+        result.applied.extend(regime_applied)
+
         # Adaptive rulebook: an additional, conservative-only clamp/veto layer.
         rule_applied = self._apply_adaptive_rules(symbol, result)
         result.applied.extend(rule_applied)
@@ -127,6 +163,9 @@ class RiskService:
                     "target_qty": abs(result.delta_qty),
                     "decision_id": decision_id,
                     "mode": state.get_mode(),
+                    # Reference price this decision was sized at, for the
+                    # execution-side price-deviation guard (plan §1.4).
+                    "ref_price": price,
                 },
             )
         return {"status": "approved", "side": result.side, "qty": abs(result.delta_qty), "applied": result.applied}
