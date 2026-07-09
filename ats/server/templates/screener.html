@@ -7,13 +7,17 @@
     <p class="sub">Deterministic multi-factor screens over the analytics table — value, quality, dividend safety, momentum. Every number is our own math (no vendor lock-in). Click a row for its chart.</p>
     <div class="charttools" id="presetTabs">
       <button data-preset="" class="primary">All</button>
+      <button data-preset="undervalued">Undervalued</button>
+      <button data-preset="overvalued">Overvalued</button>
       <button data-preset="value">Value</button>
       <button data-preset="quality">Quality</button>
       <button data-preset="dividend">Dividend</button>
       <button data-preset="momentum">Momentum</button>
       <span class="spacer"></span>
+      <button id="refreshStmtsBtn" class="go" title="Fetch financial statements now so fair-value verdicts populate (may take ~1 min)">↻ Statements</button>
       <button id="csvBtn" title="Export current view to CSV">⇩ CSV</button>
     </div>
+    <p class="sub" id="valHint" style="display:none">Fair-value verdicts are empty until statements are fetched. Click <b>↻ Statements</b> once (weekly refresh runs Sundays).</p>
     <div class="scroll">
       <table id="screenTable">
         <thead>
@@ -49,6 +53,9 @@ async function load(preset){
   const j = await r.json();
   CURRENT = j.rows||[];
   const body = document.getElementById("screenBody");
+  const isVal = preset==="undervalued"||preset==="overvalued";
+  // Hint the user to fetch statements when a valuation screen is empty.
+  document.getElementById("valHint").style.display = (isVal && !CURRENT.length) ? "" : "none";
   if(!CURRENT.length){ body.innerHTML = `<tr><td colspan="11" class="empty">No symbols match this screen yet. Snapshots build after the close pass (or run with ATS_DATA_SOURCE=synthetic).</td></tr>`; return; }
   body.innerHTML = CURRENT.map(row=>`
     <tr onclick="location.href='/charts?symbol=${encodeURIComponent(row.symbol)}'" style="cursor:pointer">
@@ -72,8 +79,19 @@ function toCsv(){
   const blob=new Blob([lines.join("\n")],{type:"text/csv"});
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="screener.csv"; a.click();
 }
-document.querySelectorAll("#presetTabs button[data-preset]").forEach(b=>b.onclick=()=>load(b.dataset.preset||""));
+let ACTIVE = "";
+document.querySelectorAll("#presetTabs button[data-preset]").forEach(b=>b.onclick=()=>{ ACTIVE=b.dataset.preset||""; load(ACTIVE); });
 document.getElementById("csvBtn").onclick=toCsv;
+document.getElementById("refreshStmtsBtn").onclick=async(e)=>{
+  const btn=e.currentTarget; const old=btn.textContent;
+  btn.disabled=true; btn.textContent="Fetching… (~1 min)";
+  try{
+    const r=await fetch("/api/analytics/refresh-statements",{method:"POST"});
+    const j=await r.json();
+    btn.textContent = j.status==="ok" ? `✓ ${j.statement_rows} rows` : "unavailable";
+  }catch(err){ btn.textContent="failed"; }
+  setTimeout(()=>{ btn.disabled=false; btn.textContent=old; load(ACTIVE); }, 1500);
+};
 load("");
 </script>
 {% endblock %}

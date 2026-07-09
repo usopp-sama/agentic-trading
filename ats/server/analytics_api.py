@@ -42,9 +42,30 @@ def movers(request: Request) -> dict:
 
 @router.get("/screener")
 def screener(request: Request, preset: str | None = None) -> dict:
-    """Run a named preset (value/quality/dividend/momentum) over the metrics
-    table, or return the whole table when no preset is given."""
+    """Run a named preset (value/quality/dividend/momentum/undervalued/
+    overvalued) over the metrics table, or return the whole table."""
     svc = _svc(request)
     if not svc:
         return {"rows": [], "presets": [], "preset": preset}
     return {"rows": svc.screener(preset), "presets": svc.presets(), "preset": preset}
+
+
+@router.post("/analytics/refresh-statements")
+def refresh_statements(request: Request) -> dict:
+    """Pull financial statements now (P1.3) so fair-value verdicts populate,
+    then recompute the analytics snapshots. Runs in the request threadpool
+    (sync handler) so it never blocks the event loop; may take ~30-60s on the
+    first run over the network."""
+    orch = getattr(request.app.state, "orchestrator", None)
+    fundamentals = orch.get("fundamentals") if orch else None
+    if fundamentals is None or not hasattr(fundamentals, "refresh_statements"):
+        return {"status": "unavailable"}
+    rows = fundamentals.refresh_statements()
+    analytics = orch.get("analytics") if orch else None
+    refreshed = 0
+    if analytics is not None:
+        try:
+            refreshed = analytics.run_close_pass()   # so verdicts appear now
+        except Exception:  # noqa: BLE001
+            pass
+    return {"status": "ok", "statement_rows": rows, "symbols_rescored": refreshed}

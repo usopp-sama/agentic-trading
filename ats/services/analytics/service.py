@@ -35,6 +35,9 @@ _PRESETS = {
     "quality": lambda r: _ge(r.get("f_score"), 7),
     "dividend": lambda r: _ge(r.get("dividend_yield"), 0.04) and _ge(r.get("f_score"), 7),
     "momentum": lambda r: _ge(r.get("tech_score"), 3) and _ge(r.get("near_high_pct"), -5),
+    # Fair-value verdicts (P1.3): the undervalued/overvalued surface.
+    "undervalued": lambda r: r.get("verdict") == "undervalued",
+    "overvalued": lambda r: r.get("verdict") == "overvalued",
 }
 
 
@@ -195,10 +198,17 @@ class AnalyticsService:
         """Filter the metrics table by a named preset (value/quality/dividend/
         momentum). Unknown/empty preset returns the full table."""
         rows = self.table()
-        pred = _PRESETS.get((preset or "").lower())
+        key = (preset or "").lower()
+        pred = _PRESETS.get(key)
         if pred is None:
             return rows
-        return [r for r in rows if pred(r)]
+        out = [r for r in rows if pred(r)]
+        # Valuation screens rank by margin of safety (cheapest / dearest first).
+        if key == "undervalued":
+            out.sort(key=lambda r: (r.get("mos_pct") if r.get("mos_pct") is not None else -1e9), reverse=True)
+        elif key == "overvalued":
+            out.sort(key=lambda r: (r.get("mos_pct") if r.get("mos_pct") is not None else 1e9))
+        return out
 
     def presets(self) -> list[str]:
         return list(_PRESETS.keys())
