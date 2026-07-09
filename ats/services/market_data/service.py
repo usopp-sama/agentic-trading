@@ -12,6 +12,8 @@ from __future__ import annotations
 import asyncio
 from datetime import date
 
+from ats.core.telemetry import instrument
+
 import numpy as np
 import pandas as pd
 from sqlalchemy import select
@@ -119,6 +121,7 @@ class MarketDataService:
         log.info("market_data_backfilled", extra={"symbols": n, "background": True})
 
     # --- polling -----------------------------------------------------------
+    @instrument("market_data", "poll_all")
     async def poll_all(self) -> None:
         if self._market_closed():
             return

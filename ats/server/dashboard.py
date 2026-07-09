@@ -206,6 +206,7 @@ def mount_dashboard(app: FastAPI) -> None:
     app.add_api_route("/llm", page("llm.html", "llm"), response_class=HTMLResponse)
     app.add_api_route("/logs", page("logs.html", "logs"), response_class=HTMLResponse)
     app.add_api_route("/system", page("system.html", "system"), response_class=HTMLResponse)
+    app.add_api_route("/ops", page("ops.html", "ops"), response_class=HTMLResponse)
 
     # Legacy paths fold into System (pipeline/agents) or Today (overview).
     for old, target in {"/overview": "/", "/pipeline": "/system",

@@ -101,6 +101,9 @@ class Orchestrator:
                 log.info("service_started", extra={"service": service.name})
             except Exception:  # noqa: BLE001
                 log.exception("service_start_failed", extra={"service": service.name})
+                # Ops Console (P4.1): a service that failed to start is DOWN.
+                from ats.core import telemetry
+                telemetry.mark(getattr(service, "name", "?"), telemetry.Health.DOWN)
         # Perf telemetry (P0.1): job timings + the event-loop lag probe.
         try:
             self.scheduler.add_listener(

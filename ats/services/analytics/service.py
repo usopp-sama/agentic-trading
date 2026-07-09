@@ -23,6 +23,7 @@ from sqlalchemy import select
 from ats.core.db import session_scope
 from ats.core.logging import get_logger
 from ats.core.models import AnalyticsSnapshot
+from ats.core.telemetry import instrument
 from quant.analysis import intraday, patterns
 from quant.analysis.levels import classic_pivots, fibonacci_retracements, session_anchor
 from quant.analysis.summary import technical_summary
@@ -89,6 +90,7 @@ class AnalyticsService:
         log.info("analytics_started")
 
     # --- passes -----------------------------------------------------------------
+    @instrument("analytics", "close_pass")
     def run_close_pass(self) -> int:
         """Compute + persist a snapshot for every watchlist symbol."""
         n = 0

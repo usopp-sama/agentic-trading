@@ -28,6 +28,7 @@ from ats.core.config import get_settings
 from ats.core.db import session_scope
 from ats.core.logging import get_logger
 from ats.core.models import AllocationRecommendation, NewsItem, ResearchNote
+from ats.core.telemetry import instrument
 from ats.services.research import hypotheses as registry
 from ats.services.research import roles as R
 
@@ -154,6 +155,7 @@ class ResearchFactoryService:
         return {"pass": "monthly",
                 "roles": [self.run_role(r) for r in R.MONTHLY_ROLES]}
 
+    @instrument("research", "run_role")
     def run_role(self, role: str, actor: str = "scheduler") -> dict:
         """One role pass: budget gate → grounded context → LLM → persist."""
         if role not in R.ROLES:

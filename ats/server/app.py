@@ -50,6 +50,7 @@ def create_app() -> FastAPI:
     from ats.server.analytics_api import router as analytics_router
     from ats.server.api import router as control_router
     from ats.server.experts_api import router as experts_router
+    from ats.server.ops_api import router as ops_router
     from ats.server.research_api import router as research_router
     from ats.server.results_api import router as results_router
 
@@ -58,6 +59,7 @@ def create_app() -> FastAPI:
     app.include_router(research_router)
     app.include_router(results_router)
     app.include_router(analytics_router)
+    app.include_router(ops_router)
 
     # Dashboard (HTML + websocket) is mounted if present.
     with contextlib.suppress(Exception):

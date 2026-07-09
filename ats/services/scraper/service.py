@@ -12,6 +12,8 @@ import asyncio
 import hashlib
 import re
 
+from ats.core.telemetry import instrument
+
 from sqlalchemy import select
 
 from ats.core.db import session_scope
@@ -87,6 +89,7 @@ class ScraperService:
         self._mock_fallback = MockCollector(universe, n=6)
         return collectors
 
+    @instrument("scraper", "collect_once")
     async def collect_once(self) -> int:
         if self._mapper is None:
             return 0

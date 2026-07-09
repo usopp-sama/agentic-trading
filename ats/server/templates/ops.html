@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Ops Console{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="card span12 reveal">
+    <h2>Ops Console — the engine room</h2>
+    <p class="sub">Deep system observability, separate from the money dashboard. Component health, resources, event-loop perf, local models, and every account's holdings.</p>
+  </div>
+
+  <div class="card span8 reveal">
+    <h2>System health</h2>
+    <div id="healthGrid" class="opp-grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))"><div class="empty">Loading…</div></div>
+  </div>
+
+  <div class="card span4 reveal">
+    <h2>Resources</h2>
+    <div id="resBox"><div class="empty">Loading…</div></div>
+  </div>
+
+  <div class="card span6 reveal">
+    <h2>Event loop &amp; perf</h2>
+    <div id="perfBox"><div class="empty">Loading…</div></div>
+  </div>
+
+  <div class="card span6 reveal">
+    <h2>Local models</h2>
+    <div id="modelsBox"><div class="empty">Loading…</div></div>
+  </div>
+
+  <div class="card span12 reveal">
+    <h2>Accounts &amp; demat</h2>
+    <p class="sub">Every profile (main + league solos): bank cash + demat holdings (settled / pending T+1)</p>
+    <div class="scroll"><table id="acctTable"><thead><tr>
+      <th>Account</th><th class="r">Cash</th><th class="r">Available</th><th>BO ID</th>
+      <th class="r">Pending</th><th>Holdings (settled+pending)</th>
+    </tr></thead><tbody><tr><td colspan="6" class="empty">Loading…</td></tr></tbody></table></div>
+  </div>
+
+  <div class="card span12 reveal">
+    <h2>Telemetry — recent spans</h2>
+    <div class="scroll" style="max-height:260px"><table id="telTable"><thead><tr>
+      <th>When</th><th>Component</th><th>Op</th><th class="r">ms</th><th>Outcome</th>
+    </tr></thead><tbody><tr><td colspan="5" class="empty">Loading…</td></tr></tbody></table></div>
+  </div>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+(function () {
+  const A = window.ATS;
+  const esc = A.esc, ago = A.ago;
+  const HCLS = { OK: "green", IDLE: "gray", DEGRADED: "amber", DOWN: "red" };
+
+  async function get(u) { try { return await A.fetchJSON(u); } catch (e) { return null; } }
+
+  async function loadHealth() {
+    const h = await get("/api/ops/health"); if (!h) return;
+    const tel = await get("/api/ops/telemetry") || { components: {} };
+    const el = document.getElementById("healthGrid");
+    el.innerHTML = (h.services || []).map((s) => {
+      const st = h.health[s] || "IDLE";
+      const c = (tel.components || {})[s] || {};
+      const next = h.next_runs ? Object.entries(h.next_runs).find(([k]) => k.startsWith(s)) : null;
+      return `<div class="card" style="padding:10px">
+        <div class="row-between"><b>${esc(s)}</b><span class="pill ${HCLS[st]}">${st}</span></div>
+        <div class="sub" style="margin-top:6px">${c.calls ? (c.calls + " calls · " + (c.errors || 0) + " err · p95 " + (c.p95_ms ?? "–") + "ms") : "no activity yet"}</div>
+        ${c.last_error ? `<div class="sub down">${esc(c.last_error).slice(0, 60)}</div>` : ""}
+      </div>`;
+    }).join("");
+  }
+
+  async function loadResources() {
+    const r = await get("/api/ops/resources"); const el = document.getElementById("resBox");
+    if (!r) { el.innerHTML = '<div class="empty">–</div>'; return; }
+    const row = (k, v) => v == null ? "" : `<div class="cr-stat" style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dashed var(--border)"><span class="muted">${k}</span><b>${v}</b></div>`;
+    el.innerHTML =
+      row("Process RSS", r.rss_mb != null ? r.rss_mb + " MB" : null) +
+      row("Process CPU", r.cpu_pct != null ? r.cpu_pct + " %" : null) +
+      row("Threads", r.threads) +
+      row("Host mem used", r.host_mem_used_pct != null ? r.host_mem_used_pct + " %" : null) +
+      row("DB", r.db_mb != null ? r.db_mb + " MB" : null) +
+      row("WAL", r.wal_mb != null ? r.wal_mb + " MB" : null) +
+      row("Logs", r.log_dir_mb != null ? r.log_dir_mb + " MB" : null) +
+      (r.note ? `<div class="sub muted" style="margin-top:8px">${esc(r.note)}</div>` : "");
+  }
+
+  async function loadPerf() {
+    const p = await get("/api/perf"); const el = document.getElementById("perfBox");
+    if (!p) { el.innerHTML = '<div class="empty">–</div>'; return; }
+    const lag = (p.loop_lag || [])[0];
+    const jobs = Object.entries(p.job_stats || {}).sort((a, b) => (b[1].p95_ms || 0) - (a[1].p95_ms || 0)).slice(0, 6);
+    el.innerHTML =
+      `<div class="cr-stat" style="display:flex;justify-content:space-between;padding:4px 0"><span class="muted">Last loop-lag event</span><b class="${lag && lag.ms > 250 ? 'down' : ''}">${lag ? (lag.ms + "ms · " + (lag.job || "?")) : "none 👍"}</b></div>` +
+      `<div class="muted" style="font-size:11px;margin:8px 0 4px">Slowest scheduled jobs (p95)</div>` +
+      jobs.map(([j, s]) => `<div class="cr-stat" style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed var(--border)"><span>${esc(j)}</span><b>${s.p95_ms ?? "–"}ms${s.missed ? " · " + s.missed + " missed" : ""}</b></div>`).join("") +
+      `<div class="muted" style="font-size:11px;margin-top:8px">${(p.slow_requests || []).length} slow requests recorded</div>`;
+  }
+
+  async function loadModels() {
+    const h = await get("/api/health") || {};
+    const usage = await get("/api/llm/usage") || {};
+    const el = document.getElementById("modelsBox");
+    const sent = (h.sentiment && h.sentiment.backend) || "?";
+    const llm = h.llm || {};
+    el.innerHTML =
+      `<div class="cr-stat" style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dashed var(--border)"><span class="muted">Sentiment backend</span><span class="pill ${sent === 'finbert' ? 'green' : 'gray'}">${esc(sent)}</span></div>` +
+      `<div class="cr-stat" style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dashed var(--border)"><span class="muted">LLM</span><span class="pill ${llm.real ? 'green' : 'gray'}">${llm.real ? 'real' : 'mock'} ${esc(llm.provider || '')}</span></div>` +
+      `<div class="cr-stat" style="display:flex;justify-content:space-between;padding:4px 0"><span class="muted">LLM spend (est)</span><b>₹${(usage.est_inr || 0).toFixed ? usage.est_inr.toFixed(2) : (usage.est_inr || 0)}</b></div>` +
+      `<div class="sub muted" style="margin-top:8px">Full prompt/response log on the <a href="/llm">LLM page</a>.</div>`;
+  }
+
+  async function loadAccounts() {
+    const d = await get("/api/ops/accounts"); const body = document.querySelector("#acctTable tbody");
+    const rows = (d && d.accounts) || [];
+    if (!rows.length) { body.innerHTML = '<tr><td colspan="6" class="empty">No accounts.</td></tr>'; return; }
+    body.innerHTML = rows.map((a) => {
+      const hold = (a.holdings || []).map((h) => `${esc(h.symbol)} ${h.qty_settled}+${h.qty_pending}`).join(", ") || "—";
+      return `<tr><td><b>${esc(a.account)}</b></td>
+        <td class="r">${a.cash == null ? "–" : A.fmtMoney(a.cash)}</td>
+        <td class="r">${a.available == null ? "–" : A.fmtMoney(a.available)}</td>
+        <td class="muted">${esc(a.bo_id || "–")}</td>
+        <td class="r">${a.pending_settlement || 0}</td>
+        <td class="sub">${hold}</td></tr>`;
+    }).join("");
+  }
+
+  async function loadTelemetry() {
+    const t = await get("/api/ops/telemetry"); const body = document.querySelector("#telTable tbody");
+    const spans = (t && t.recent) || [];
+    if (!spans.length) { body.innerHTML = '<tr><td colspan="5" class="empty">No spans yet.</td></tr>'; return; }
+    const oc = { OK: "green", SLOW: "amber", ERROR: "red", SKIPPED: "gray", DEGRADED: "amber" };
+    body.innerHTML = spans.slice(0, 40).map((s) =>
+      `<tr><td class="muted">${ago(new Date(s.ts * 1000).toISOString())} ago</td>
+        <td>${esc(s.component)}</td><td class="muted">${esc(s.op)}</td>
+        <td class="r">${s.ms}</td><td><span class="pill ${oc[s.outcome] || 'gray'}">${esc(s.outcome)}</span></td></tr>`).join("");
+  }
+
+  function refresh() { loadHealth(); loadResources(); loadPerf(); loadModels(); loadAccounts(); loadTelemetry(); }
+  refresh();
+  setInterval(refresh, 5000);
+})();
+</script>
+{% endblock %}

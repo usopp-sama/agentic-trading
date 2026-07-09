@@ -10,6 +10,7 @@ import asyncio
 
 from ats.core.events import Topic
 from ats.core.logging import get_logger
+from ats.core.telemetry import instrument
 from ats.server.hub import get_hub
 from ats.services.dashboard.snapshot import build_snapshot
 
@@ -46,6 +47,7 @@ class DashboardService:
             {"type": "event", "topic": evt.topic, "payload": evt.payload, "ts": ts}
         )
 
+    @instrument("dashboard", "broadcast_snapshot")
     async def broadcast_snapshot(self) -> None:
         # Build off the loop (DB + service aggregation) and cache it, so the
         # 5s tick never stalls the loop and GET /api/dashboard is O(1) (P0.4).

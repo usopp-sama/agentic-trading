@@ -28,6 +28,7 @@ from ats.core.config import get_settings
 from ats.core.db import session_scope
 from ats.core.logging import get_logger
 from ats.core.models import FlowDaily
+from ats.core.telemetry import instrument
 from ats.services.flows import collectors
 from ats.services.flows.signature import pump_signature
 
@@ -66,6 +67,7 @@ class FlowsService:
         log.info("flows_started", extra={"mode": settings.flows_veto_mode})
 
     # --- collection -------------------------------------------------------------
+    @instrument("flows", "collect_and_score")
     def collect_and_score(self) -> dict:
         out = self.collect()
         out.update(self.recompute_vetoes())
