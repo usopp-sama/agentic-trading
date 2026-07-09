@@ -116,6 +116,8 @@ STRATEGIES: list[tuple[str, str, str, str]] = [
     ("turn_of_month", "Turn-of-Month Seasonality", "other", "shadow"),
     ("vol_target", "Volatility-Managed Exposure Overlay", "other", "shadow"),
     ("vol_premium", "Iron Condor — Variance Risk Premium", "vol", "paper"),
+    # QA-8: analytics-engine confluence sleeve (shadow until the gate promotes it).
+    ("tech_confluence", "Confluence: composite summary + level support", "trend", "shadow"),
 ]
 
 

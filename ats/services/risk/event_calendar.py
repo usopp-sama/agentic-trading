@@ -46,6 +46,26 @@ _MANUAL_KEY = "veto:manual"
 _SEVERITY_KEY = "veto:severity"
 
 
+def _as_float(v) -> float | None:
+    if v is None:
+        return None
+    try:
+        f = float(v)
+        return f if f == f else None
+    except (TypeError, ValueError):
+        return None
+
+
+def surprise_pct(actual: float | None, estimate: float | None) -> float | None:
+    """The calendar "surprise": ``(actual - estimate) / |estimate| * 100``.
+
+    Markets react to the surprise, not the absolute print. ``None`` when either
+    input is missing or the estimate is zero (surprise is undefined)."""
+    if actual is None or estimate is None or estimate == 0:
+        return None
+    return (actual - estimate) / abs(estimate) * 100.0
+
+
 def last_thursday(year: int, month: int) -> date:
     """NSE F&O monthly expiry day (holiday shifts not modeled — close enough
     for a veto that errs on the side of caution)."""
@@ -88,8 +108,14 @@ class EventCalendar:
         d = e.get("date")
         if isinstance(d, str):
             d = date.fromisoformat(d)
-        return {"date": d, "kind": str(e.get("kind", "event")),
-                "note": str(e.get("note", ""))}
+        est = _as_float(e.get("estimate"))
+        act = _as_float(e.get("actual"))
+        out = {"date": d, "kind": str(e.get("kind", "event")),
+               "note": str(e.get("note", "")), "estimate": est, "actual": act}
+        sp = surprise_pct(act, est)
+        if sp is not None:
+            out["surprise_pct"] = round(sp, 2)
+        return out
 
     def global_events(self, on: date) -> list[dict]:
         return [e for e in self._global if e["date"] == on]

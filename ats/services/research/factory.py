@@ -70,6 +70,24 @@ _SEED_HYPOTHESES = [
         "universe": ["NIFTY-50 constituents"],
         "evidence": "Bulk/block deal disclosures; delivery-percentage shifts (public NSE data).",
     },
+    {
+        "agent": "human",
+        "title": "Confluence: composite summary + level support",
+        "thesis": (
+            "A strongly bullish composite technical read (trend + momentum + "
+            "volume all agreeing) is a higher-quality entry when it happens at a "
+            "price floor — buying the dip in an uptrend rather than chasing."
+        ),
+        "rule": (
+            "BUY symbol S when the 12-check technical_summary score >= +6 AND "
+            "price is within 1% of a classic-pivot or Fibonacci support level. "
+            "Exit when the summary score rolls over to <= 0. Long-only, "
+            "watchlist universe. Implemented as sleeve 'tech_confluence' (shadow)."
+        ),
+        "params": {"buy_score": 6, "near_pct": 1.0},
+        "universe": ["watchlist"],
+        "evidence": "Confluence/multiple-timeframe literature; the QA-3 composite + QA-1 levels.",
+    },
 ]
 
 
@@ -141,6 +159,13 @@ class ResearchFactoryService:
         if role not in R.ROLES:
             return {"role": role, "ok": False, "error": "unknown role"}
 
+        # QA-8.4: the weekly fundamentals pass is deterministic by default —
+        # F-score/verdict red flags + screener hits from the analytics engine,
+        # zero LLM spend. The LLM version stays for manual (human) runs.
+        if (role == "fundamentals_analyst" and actor != "human"
+                and not get_settings().research_fundamentals_llm):
+            return self._deterministic_fundamentals(role)
+
         budget = self.budget_status()
         if actor != "human" and budget["exhausted"]:
             self._note(role, f"{R.ROLES[role]['name']} — skipped",
@@ -168,6 +193,44 @@ class ResearchFactoryService:
         log.info("research_role_ran",
                  extra={"role": role, "actor": actor, "parsed": parsed is not None})
         return {"role": role, "ok": True, "parsed": parsed is not None, **result}
+
+    def _deterministic_fundamentals(self, role: str) -> dict:
+        """LLM-free fundamentals note from the analytics engine (QA-8.4): scan
+        the metrics table for red flags (weak F-score, overvalued) and surface
+        the current screener hits so the slow loop reads pre-digested tables
+        instead of paying the LLM to remember fundamentals."""
+        analytics = self._orch.get("analytics") if self._orch else None
+        if analytics is None:
+            self._note(role, "Fundamentals scan — skipped",
+                       "Analytics service unavailable.", {"llm": False})
+            return {"role": role, "ok": False, "reason": "no_analytics"}
+
+        rows = analytics.table()
+        flags: list[str] = []
+        for r in rows:
+            sym, f, v = r.get("symbol"), r.get("f_score"), r.get("verdict")
+            if f is not None and f <= 2:
+                flags.append(f"{sym}: weak fundamentals (Piotroski F={f})")
+            if v == "overvalued":
+                flags.append(f"{sym}: overvalued vs fair value ({r.get('mos_pct')}%)")
+        hits = {p: [x["symbol"] for x in analytics.screener(p)[:10]]
+                for p in analytics.presets()}
+
+        lines = ["Red flags: " + ("; ".join(flags[:15]) if flags
+                                   else "none in the screened universe.")]
+        for preset, syms in hits.items():
+            if syms:
+                lines.append(f"{preset.title()} screen: " + ", ".join(syms[:10]))
+        self._note(
+            role, f"Fundamentals scan {date.today().isoformat()} (deterministic)",
+            "\n".join(lines),
+            {"llm": False, "red_flags": flags[:30], "screener_hits": hits,
+             "universe": len(rows)},
+        )
+        self._mark_run(role)
+        log.info("research_fundamentals_deterministic",
+                 extra={"flags": len(flags), "universe": len(rows)})
+        return {"role": role, "ok": True, "llm": False, "flags": len(flags)}
 
     def nightly_maintenance(self) -> dict:
         """LLM-free nightly pass: archive digest note + veto-calendar reload."""

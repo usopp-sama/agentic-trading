@@ -401,6 +401,10 @@ class Settings(BaseSettings):
     # Core allocation sleeve (three-loop plan §2): weekly rebalance cadence in
     # calendar days; regime flips rebalance immediately regardless.
     core_alloc_rebalance_days: int = 7
+    # Tech-confluence sleeve (QA-8): BUY when the composite technical summary
+    # score >= buy_score AND price is within near_pct% of a pivot/fib support.
+    tech_confluence_buy_score: int = 6
+    tech_confluence_near_pct: float = 1.0
 
     # --- Slow loop: research factory (three-loop plan §3) ---
     # Scheduled LLM research runs: Sat 10:00 IST weekly pass, first Sunday
@@ -413,6 +417,11 @@ class Settings(BaseSettings):
     # Committee recommendations may tilt sleeve weights at most this fraction
     # (±) after human approval; guardrails are never touched.
     committee_max_tilt: float = 0.10
+    # QA-8: when false (default) the weekly fundamentals-analyst pass writes a
+    # deterministic red-flag note from F-score/payout/Altman thresholds instead
+    # of calling the LLM (the whole point of the quant engine — cut LLM spend).
+    # The LLM version stays available for manual dashboard runs.
+    research_fundamentals_llm: bool = False
 
     # --- Flow anomalies (plan §4 / WS-5): pump-signature veto -------------
     # shadow = score + audit what WOULD be vetoed, block nothing (default —

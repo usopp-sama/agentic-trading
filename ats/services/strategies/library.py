@@ -6,6 +6,12 @@ import numpy as np
 import pandas as pd
 
 from quant.analysis import indicators
+from quant.analysis.levels import (
+    classic_pivots,
+    fibonacci_retracements,
+    nearest_level,
+)
+from quant.analysis.summary import technical_summary
 from ats.core.schemas import SignalModel, Stance
 from ats.services.strategies.base import Strategy, UniverseStrategy
 
@@ -524,6 +530,57 @@ class NavPremium(UniverseStrategy):
         return signals
 
 
+class TechConfluence(Strategy):
+    """Confluence: composite technical summary + level support (QA-8).
+
+    The medium-loop candidate built on the analytics engine. BUY only when the
+    12-check ``technical_summary`` is strongly bullish (score ≥ +6) *and* price
+    is sitting within ``near_pct`` of a pivot/fib support (trend + momentum
+    agreeing at a floor — "buy the dip in an uptrend"). Exit when the summary
+    rolls over (score ≤ 0). Shadow until the walk-forward gate promotes it; it
+    is registered as a hypothesis so it walks the same lifecycle as everything
+    else.
+    """
+
+    id = "tech_confluence"
+    style = "trend"
+    min_bars = 60
+
+    def __init__(self, buy_score: int = 6, near_pct: float = 1.0) -> None:
+        self.buy_score, self.near_pct = buy_score, near_pct
+
+    def evaluate(self, symbol: str, df: pd.DataFrame) -> SignalModel | None:
+        if len(df) < self.min_bars or "close" not in df.columns:
+            return None
+        ts = technical_summary(symbol, df)
+        price = float(df["close"].iloc[-1])
+        # Exit / short-bias when the composite rolls over.
+        if ts.score <= 0:
+            return self._signal(
+                symbol, Stance.SELL, min(1.0, 0.1 + (-ts.score) / 12.0),
+                tech_score=ts.score, reason="summary_rolled_over",
+            )
+        # BUY only at a level with a strongly bullish composite.
+        if ts.score >= self.buy_score and all(c in df.columns for c in ("high", "low")):
+            prev = df.iloc[-2]
+            piv = classic_pivots(float(prev["high"]), float(prev["low"]), float(prev["close"]))
+            win = df.tail(252)
+            fib = fibonacci_retracements(
+                float(win["high"].max()), float(win["low"].min()), "down"
+            )
+            supports = [lv for lv in (piv.all_levels() + list(fib.values()))
+                        if 0 < lv <= price]
+            if supports:
+                nearest, dist = nearest_level(price, supports)
+                if abs(dist) <= self.near_pct:
+                    conv = min(1.0, 0.4 + 0.1 * (ts.score - self.buy_score))
+                    return self._signal(
+                        symbol, Stance.BUY, conv, tech_score=ts.score,
+                        support=round(nearest, 2), dist_pct=round(dist, 3),
+                    )
+        return self._signal(symbol, Stance.NEUTRAL, 0.0, tech_score=ts.score)
+
+
 def default_strategies() -> list[Strategy]:
     from ats.core.config import get_settings
     from ats.services.strategies.library_events import (
@@ -561,6 +618,9 @@ def default_strategies() -> list[Strategy]:
         ),
         TurnOfMonth(days_before=s.tom_days_before, days_after=s.tom_days_after),
         VolatilityTarget(target_vol=s.vol_target_annual, max_vol=s.vol_target_max),
+        # QA-8: analytics-engine confluence sleeve (shadow until the gate clears).
+        TechConfluence(buy_score=s.tech_confluence_buy_score,
+                       near_pct=s.tech_confluence_near_pct),
     ]
 
 

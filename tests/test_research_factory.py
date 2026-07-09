@@ -218,12 +218,15 @@ def test_seed_hypotheses_idempotent(memdb):
     svc.seed_default_hypotheses()
     svc.seed_default_hypotheses()
     rows = registry.list_all()
-    assert len(rows) == 2
+    assert len(rows) == 3
     by_title = {h["title"]: h for h in rows}
     veto = by_title["Flow-anomaly veto: refuse entries on pump signatures"]
     assert veto["stage"] == "SPECIFIED" and veto["agent"] == "human"
     ride = by_title["Institutional-flow momentum in liquid names"]
     assert ride["stage"] == "PROPOSED"  # deliberately unspecified until Hyp A pays
+    # QA-8: the confluence sleeve is seeded as a specified hypothesis.
+    conf = by_title["Confluence: composite summary + level support"]
+    assert conf["stage"] == "SPECIFIED" and conf["agent"] == "human"
 
 
 def test_nightly_maintenance_is_llm_free(memdb):
