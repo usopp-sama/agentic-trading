@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Control Room{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/control_room.css">
+<div class="cr-root">
+  <div class="cr-panes">
+    <!-- LEFT: market heatmap -->
+    <div class="cr-left">
+      <div class="cr-card">
+        <h2>Market Heatmap · <span class="muted" id="crHeatMeta">—</span></h2>
+        <div class="cr-heat" id="crHeat"><div class="empty">Loading analytics…</div></div>
+        <div class="cr-legend">
+          <span><i style="background:rgba(0,200,120,.34)"></i>strong buy</span>
+          <span><i style="background:rgba(0,200,120,.18)"></i>buy</span>
+          <span><i style="background:rgba(140,140,140,.25)"></i>neutral</span>
+          <span><i style="background:rgba(255,90,120,.18)"></i>sell</span>
+          <span><i style="background:rgba(255,90,120,.34)"></i>strong sell</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- CENTRE: opportunities ticker -->
+    <div class="cr-center">
+      <div class="cr-card">
+        <h2>Active Signals</h2>
+        <div class="cr-ticker" id="crTicker"><div class="empty">Scanning…</div></div>
+      </div>
+    </div>
+
+    <!-- RIGHT: status -->
+    <div class="cr-right">
+      <div class="cr-card">
+        <h2>Status</h2>
+        <div class="cr-eq">
+          <div class="k muted" style="font-size:12px">Equity</div>
+          <div class="v" id="crEquity">—</div>
+          <div id="crDayPnl" class="cr-mono" style="font-size:13px">—</div>
+        </div>
+        <div class="cr-stat"><span class="k">Mode</span><b id="crMode">—</b></div>
+        <div class="cr-stat"><span class="k">Regime</span><b id="crRegime">—</b></div>
+        <div class="cr-stat"><span class="k">Loops (F·M·S)</span>
+          <span class="cr-dots"><i class="cr-dot f" id="crLoopF"></i><i class="cr-dot m" id="crLoopM"></i><i class="cr-dot s" id="crLoopS"></i></span></div>
+        <div class="cr-stat"><span class="k">LLM</span><b id="crLlm">—</b></div>
+        <div class="cr-stat"><span class="k">Kill switch</span><b id="crKill">—</b></div>
+        <h2 style="margin-top:16px">Volume-confirmed</h2>
+        <div id="crMovers"><div class="empty">—</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="cr-drawer" id="crDrawer">
+  <button class="icon-btn x" id="crDrawerX">✕</button>
+  <div id="crDrawerBody"></div>
+</div>
+
+<div class="cr-cmd">
+  <input id="crCmd" placeholder="&gt;  type a symbol to filter / Enter to open  ·  ESC clears" autocomplete="off">
+</div>
+{% endblock %}
+{% block script %}
+<script src="/static/control_room.js"></script>
+{% endblock %}
