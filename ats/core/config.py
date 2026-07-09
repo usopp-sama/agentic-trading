@@ -320,6 +320,11 @@ class Settings(BaseSettings):
 
     # --- Scheduler cadences (seconds) ---
     market_scan_interval_s: int = 60
+    # Perf plan P0.2: network polls run off the event loop with a hard per-symbol
+    # timeout, and a poll cycle circuit-breaks after this many consecutive
+    # failures so one bad-network stretch can't freeze the dashboard.
+    market_poll_timeout_s: float = 10.0
+    market_poll_max_consecutive_failures: int = 3
     news_poll_interval_s: int = 300
     agent_cycle_interval_s: int = 120
     # Marketaux free tier allows only 100 requests/day. News polls every

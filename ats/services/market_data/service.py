@@ -9,6 +9,7 @@ agents).
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 
 import numpy as np
@@ -79,11 +80,22 @@ class MarketDataService:
     async def poll_all(self) -> None:
         if self._market_closed():
             return
+        from ats.core.config import get_settings
+
+        max_fail = get_settings().market_poll_max_consecutive_failures
+        consecutive = 0
         for symbol in self._symbols:
             try:
                 await self._poll_symbol(symbol)
-            except Exception as exc:  # noqa: BLE001
+                consecutive = 0
+            except Exception as exc:  # noqa: BLE001 (incl. asyncio.TimeoutError)
+                consecutive += 1
                 log.warning("poll_failed", extra={"symbol": symbol, "error": str(exc)})
+                # Circuit-break: on a bad-network stretch, abandon the rest of
+                # this cycle rather than let each symbol time out in turn (P0.2).
+                if consecutive >= max_fail:
+                    log.warning("poll_circuit_break", extra={"consecutive": consecutive})
+                    break
         await self._check_feed_degradation()
 
     async def _check_feed_degradation(self) -> None:
@@ -125,7 +137,15 @@ class MarketDataService:
 
     async def _poll_symbol(self, symbol: str) -> None:
         self._closed_logged = False
-        df = self.source.poll(symbol)
+        from ats.core.config import get_settings
+
+        # P0.2: the source poll is (potentially) a blocking network call —
+        # run it in a worker thread with a hard timeout so it can never stall
+        # the event loop (and thus every HTTP response) the way it used to.
+        timeout = get_settings().market_poll_timeout_s
+        df = await asyncio.wait_for(
+            asyncio.to_thread(self.source.poll, symbol), timeout=timeout
+        )
         added = upsert_bars(symbol, df)
         self._history[symbol] = df
         last_close = float(df["close"].iloc[-1])

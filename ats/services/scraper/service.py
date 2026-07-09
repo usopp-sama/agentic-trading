@@ -8,6 +8,7 @@ treated as instructions).
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 
@@ -105,7 +106,8 @@ class ScraperService:
         collected = 0
         for collector in collectors:
             try:
-                items = collector.collect()
+                # P0.2: RSS/HTTP collection is blocking network — off the loop.
+                items = await asyncio.to_thread(collector.collect)
             except Exception as exc:  # noqa: BLE001
                 log.warning("collector_failed", extra={"collector": collector.name, "error": str(exc)})
                 continue
