@@ -2,6 +2,7 @@
 
 from quant.analysis import (
     indicators,
+    intraday,
     levels,
     patterns,
     screener,
@@ -22,6 +23,7 @@ __all__ = [
     "levels",
     "patterns",
     "summary",
+    "intraday",
     "Screener",
     "min_filter",
     "max_filter",
