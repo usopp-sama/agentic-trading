@@ -14,6 +14,7 @@ data in and persists results out. Nothing here proposes a trade.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 
 import pandas as pd
@@ -55,15 +56,23 @@ class AnalyticsService:
     def __init__(self) -> None:
         self._md = None
         self._orch = None
+        self._boot_task: asyncio.Task | None = None
         self._movers: dict = {"gainers": [], "losers": [], "volume_confirmed": []}
 
     async def start(self, ctx) -> None:
         self._md = ctx.orchestrator.get("market_data")
         self._orch = ctx.orchestrator
-        try:
-            self.run_close_pass()          # from stored history, no network
-        except Exception as exc:  # noqa: BLE001 — boot must not fail on analytics
-            log.warning("analytics_boot_pass_failed", extra={"error": str(exc)})
+
+        # P0.5: the boot close-pass (52-symbol compute) used to block startup on
+        # the loop. Run it off the boot path in a worker thread so the server
+        # starts listening immediately; snapshots fill in a beat later.
+        async def _boot_pass() -> None:
+            try:
+                await asyncio.to_thread(self.run_close_pass)
+            except Exception as exc:  # noqa: BLE001 — boot must not fail on analytics
+                log.warning("analytics_boot_pass_failed", extra={"error": str(exc)})
+
+        self._boot_task = asyncio.create_task(_boot_pass())
         try:
             from ats.services.market_data.calendar import IST
             tz = {"timezone": IST}
