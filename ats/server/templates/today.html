@@ -42,6 +42,16 @@
   </div>
 
   <div class="card span12 reveal">
+    <h2>Movers</h2>
+    <p class="sub">Volume-confirmed movers only — a move counts when volume clears 1.5× its 20-day average</p>
+    <div id="movers" style="display:flex;gap:24px;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px"><h3 class="muted" style="font-size:12px">Gainers</h3><div id="mvGain"><div class="empty">–</div></div></div>
+      <div style="flex:1;min-width:200px"><h3 class="muted" style="font-size:12px">Losers</h3><div id="mvLose"><div class="empty">–</div></div></div>
+      <div style="flex:1;min-width:200px"><h3 class="muted" style="font-size:12px">Volume-confirmed</h3><div id="mvVol"><div class="empty">–</div></div></div>
+    </div>
+  </div>
+
+  <div class="card span12 reveal">
     <h2>Daily digest</h2>
     <p class="sub">Scroll back through how each day closed</p>
     <div id="digest"><div class="empty">No history yet.</div></div>
@@ -111,11 +121,26 @@
     }).join("");
   }
 
+  function renderMovers(m) {
+    m = m || {};
+    const row = (e) => `<div class="newsrow" style="cursor:pointer;padding:6px 4px"
+        onclick="location.href='/charts?symbol=${encodeURIComponent(e.symbol)}'">
+        <div><div class="ttl">${A.esc(e.symbol)}
+        <span class="${e.pct_change>=0?'up':'down'}">${e.pct_change>=0?'+':''}${(e.pct_change).toFixed(2)}%</span></div>
+        <div class="sub">${e.volume_x!=null?(e.volume_x+'× vol'):''}</div></div></div>`;
+    const put = (id, arr) => {
+      const el = document.getElementById(id);
+      el.innerHTML = (arr && arr.length) ? arr.slice(0, 6).map(row).join("") : '<div class="empty">–</div>';
+    };
+    put("mvGain", m.gainers); put("mvLose", m.losers); put("mvVol", m.volume_confirmed);
+  }
+
   A.on("snapshot", onSnap);
   loadBrief(false);
   A.fetchJSON("/api/dashboard").then(onSnap).catch(() => {});
   A.fetchJSON("/api/opportunities?limit=6").then((d) => renderOpps(d.opportunities)).catch(() => {});
   A.fetchJSON("/api/digest?days=14").then((d) => renderDigest(d.digest)).catch(() => {});
+  A.fetchJSON("/api/movers").then(renderMovers).catch(() => {});
 })();
 </script>
 {% endblock %}

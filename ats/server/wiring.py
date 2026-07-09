@@ -25,6 +25,7 @@ _SERVICES = [
     ("ats.services.scraper.service", "ScraperService"),
     ("ats.services.nlp.service", "NlpService"),
     ("ats.services.strategies.service", "StrategyService"),
+    ("ats.services.analytics.service", "AnalyticsService"),
     ("ats.services.knowledge.service", "KnowledgeService"),
     ("ats.services.agents.service", "AgentService"),
     ("ats.services.flows.service", "FlowsService"),

@@ -579,6 +579,25 @@ class FinancialStatements(Base):
     source: Mapped[str] = mapped_column(String(24), default="yfinance")
 
 
+class AnalyticsSnapshot(Base):
+    """One day's computed analytics per symbol (QA-7).
+
+    A denormalized JSON payload — technical summary + components, pivot/fib
+    levels, candlestick patterns, fair value with sensitivity, screener
+    metrics — persisted once per (symbol, day) by the close pass. The
+    dashboard reads these instantly (no recomputation on page load) and the
+    history accrues for the slow loop. One row per (symbol, day).
+    """
+
+    __tablename__ = "analytics_snapshots"
+    __table_args__ = (UniqueConstraint("symbol", "day", name="uq_analytics_snap"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(64), index=True)
+    day: Mapped[date] = mapped_column(Date, index=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
 class KvState(Base):
     """Small key/value table for runtime state (kill switch, mode, etc.)."""
 
