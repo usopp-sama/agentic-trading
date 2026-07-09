@@ -16,7 +16,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
@@ -206,6 +211,30 @@ def mount_dashboard(app: FastAPI) -> None:
     for old, target in {"/overview": "/", "/pipeline": "/system",
                         "/agents": "/system"}.items():
         app.add_api_route(old, _redirect(target), response_class=RedirectResponse)
+
+    # --- PWA (QA-11): installable dashboard over LAN/VPN ---------------------
+    @app.get("/manifest.webmanifest")
+    def manifest():
+        return JSONResponse(
+            {
+                "name": "Agentic Trading", "short_name": "ATS",
+                "start_url": "/", "scope": "/", "display": "standalone",
+                "background_color": "#0c1118", "theme_color": "#0c1118",
+                "description": "Deterministic trading control room",
+                "icons": [{
+                    "src": "/static/icon.svg", "sizes": "any",
+                    "type": "image/svg+xml", "purpose": "any maskable",
+                }],
+            },
+            media_type="application/manifest+json",
+        )
+
+    @app.get("/sw.js")
+    def service_worker():
+        sw = STATIC_DIR / "sw.js"
+        text = sw.read_text(encoding="utf-8") if sw.exists() else ""
+        # Served from root so the worker's scope covers the whole app.
+        return PlainTextResponse(text, media_type="application/javascript")
 
     @app.get("/api/dashboard")
     def dashboard_snapshot(request: Request):

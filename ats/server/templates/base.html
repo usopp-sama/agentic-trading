@@ -5,8 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Overview{% endblock %} · Agentic Trading</title>
   <link rel="stylesheet" href="/static/app.css">
+  <!-- PWA (QA-11): installable over LAN/VPN -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#0c1118">
+  <link rel="apple-touch-icon" href="/static/icon.svg">
   <!-- theme engine runs before paint so the chosen theme/variant applies with no flash -->
   <script src="/static/themes.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () =>
+        navigator.serviceWorker.register("/sw.js").catch(() => {}));
+    }
+  </script>
 </head>
 <body>
   <header>
