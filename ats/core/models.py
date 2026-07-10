@@ -69,6 +69,7 @@ class NewsItem(Base):
     body: Mapped[str] = mapped_column(Text, default="")
     tickers: Mapped[list] = mapped_column(JSON, default=list)
     event_type: Mapped[str] = mapped_column(String(48), default="general")
+    category: Mapped[str] = mapped_column(String(32), default="", index=True)  # P3 taxonomy
     raw_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
 
 
@@ -77,7 +78,7 @@ class SentimentScore(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     ts: Mapped[datetime] = mapped_column(DateTime, index=True, default=_utcnow)
     symbol: Mapped[str] = mapped_column(String(64), index=True)
-    news_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    news_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     model: Mapped[str] = mapped_column(String(48), default="vader")
     label: Mapped[str] = mapped_column(String(16), default="neutral")
     score: Mapped[float] = mapped_column(Float, default=0.0)  # -1..1
@@ -595,6 +596,40 @@ class AnalyticsSnapshot(Base):
     symbol: Mapped[str] = mapped_column(String(64), index=True)
     day: Mapped[date] = mapped_column(Date, index=True)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class DematAccount(Base):
+    """A simulated demat (depository) account per trading profile (P2).
+
+    The third box of Indian trading plumbing alongside the bank ledger (cash)
+    and the broker (orders): where *settled securities* sit. One per profile —
+    the main book and each league solo account. ``account_id`` mirrors the
+    broker/ledger account id so the three reconcile."""
+
+    __tablename__ = "demat_accounts"
+    account_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    dp_name: Mapped[str] = mapped_column(String(64), default="ATS Depository")
+    bo_id: Mapped[str] = mapped_column(String(16), default="")   # 16-digit BO id
+    created_ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class DematHolding(Base):
+    """Per-symbol demat holding with T+1 settlement (P2).
+
+    A BUY fill adds ``qty_pending``; a daily settlement pass moves pending →
+    settled (mirroring Indian T+1). A SELL debits settled first, then pending,
+    and may never take the total negative.
+    """
+
+    __tablename__ = "demat_holdings"
+    __table_args__ = (UniqueConstraint("account_id", "symbol", name="uq_demat_holding"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[str] = mapped_column(String(64), index=True)
+    symbol: Mapped[str] = mapped_column(String(64), index=True)
+    qty_settled: Mapped[int] = mapped_column(Integer, default=0)
+    qty_pending: Mapped[int] = mapped_column(Integer, default=0)
+    avg_cost: Mapped[float] = mapped_column(Float, default=0.0)
     updated_ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 

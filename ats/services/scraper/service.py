@@ -8,8 +8,11 @@ treated as instructions).
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
+
+from ats.core.telemetry import instrument
 
 from sqlalchemy import select
 
@@ -86,6 +89,7 @@ class ScraperService:
         self._mock_fallback = MockCollector(universe, n=6)
         return collectors
 
+    @instrument("scraper", "collect_once")
     async def collect_once(self) -> int:
         if self._mapper is None:
             return 0
@@ -105,7 +109,8 @@ class ScraperService:
         collected = 0
         for collector in collectors:
             try:
-                items = collector.collect()
+                # P0.2: RSS/HTTP collection is blocking network — off the loop.
+                items = await asyncio.to_thread(collector.collect)
             except Exception as exc:  # noqa: BLE001
                 log.warning("collector_failed", extra={"collector": collector.name, "error": str(exc)})
                 continue
@@ -145,12 +150,15 @@ class ScraperService:
             ).scalar_one_or_none()
             if exists:
                 return None
+            from ats.services.scraper.categorize import categorize
+
             item = NewsItem(
                 source=raw.get("source", ""),
                 url=url,
                 title=title,
                 body=body,
                 tickers=tickers,
+                category=categorize(title, body, tickers),  # P3 taxonomy
                 raw_hash=raw_hash,
             )
             s.add(item)

@@ -133,6 +133,13 @@ def check_broker_vs_ledger(account: str, broker) -> list[str]:
 
 def reconcile_account(account: str, ledger_backed: bool = True, broker=None) -> dict:
     mismatches = check_positions_vs_fills(account)
+    # P2: the demat (depository) leg must equal broker positions per symbol.
+    try:
+        from ats.services.accounts.demat import check_positions_vs_demat
+
+        mismatches += check_positions_vs_demat(account)
+    except Exception as exc:  # noqa: BLE001 — demat check must not crash recon
+        mismatches.append(f"{account}: demat check failed: {exc}")
     if ledger_backed:
         mismatches += check_ledger_journal(account)
         mismatches += check_ledger_vs_legacy_cash(account)
@@ -162,12 +169,24 @@ class ReconciliationService:
             hour=settings.recon_hour, minute=settings.recon_minute, timezone=IST,
             id="reconcile_daily", max_instances=1, coalesce=True,
         )
+        # P2: T+1 demat settlement — once daily, post-close, before recon so the
+        # depository holdings settle overnight like real Indian T+1.
+        ctx.scheduler.add_job(
+            self._settle_demat, "cron", hour=16, minute=30, timezone=IST,
+            id="demat_settle_daily", max_instances=1, coalesce=True,
+        )
         if settings.recon_interval_s > 0:
             ctx.scheduler.add_job(
                 self.run_sync, "interval", seconds=settings.recon_interval_s,
                 id="reconcile_interval", max_instances=1, coalesce=True,
             )
         log.info("reconcile_started", extra={"halted": entries_halted()})
+
+    def _settle_demat(self) -> int:
+        """Daily T+1 demat settlement across all profiles (P2)."""
+        from ats.services.accounts.demat import settle_pending
+
+        return settle_pending()
 
     # --- the run ---------------------------------------------------------------
     def _accounts(self) -> list[tuple[str, bool]]:

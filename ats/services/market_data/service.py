@@ -9,7 +9,10 @@ agents).
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date
+
+from ats.core.telemetry import instrument
 
 import numpy as np
 import pandas as pd
@@ -42,26 +45,19 @@ class MarketDataService:
         self._symbols: list[str] = []
         self._closed_logged = False
         self._was_degraded = False
+        self._backfill_task: asyncio.Task | None = None
 
     # --- lifecycle ---------------------------------------------------------
     async def start(self, ctx) -> None:
         self._bus = ctx.bus
         self._symbols = self._load_watchlist()
-        # One batched download warms the cache for all symbols at once.
-        prefetch = getattr(self.source, "prefetch", None)
-        if prefetch is not None:
-            prefetch(self._symbols)
-        backfilled = 0
-        for symbol in self._symbols:
-            try:
-                df = self.source.poll(symbol)
-                upsert_bars(symbol, df)
-                self._history[symbol] = df
-                self._last_price[symbol] = float(df["close"].iloc[-1])
-                backfilled += 1
-            except Exception as exc:  # noqa: BLE001
-                log.warning("backfill_failed", extra={"symbol": symbol, "error": str(exc)})
-        log.info("market_data_backfilled", extra={"symbols": backfilled})
+        # P0.5: warm the cache from the local store first (cheap DB reads, no
+        # network) so the dashboard has data the instant it loads, then do the
+        # network backfill for missing/stale symbols OFF the boot path in a
+        # background task — the server starts listening immediately.
+        stale = self._warm_from_store()
+        if stale:
+            self._backfill_task = asyncio.create_task(self._backfill_async(stale))
 
         from ats.core.config import get_settings
 
@@ -75,15 +71,76 @@ class MarketDataService:
             coalesce=True,
         )
 
+    def _warm_from_store(self) -> list[str]:
+        """Load recent bars from the DB into the in-memory cache (P0.5).
+        Returns the symbols that are missing or > 3 sessions stale and so need
+        a network backfill."""
+        stale: list[str] = []
+        now = pd.Timestamp.now().normalize()
+        for symbol in self._symbols:
+            try:
+                df = load_history(symbol, limit=400)
+            except Exception:  # noqa: BLE001
+                df = None
+            if df is None or df.empty:
+                stale.append(symbol)
+                continue
+            self._history[symbol] = df
+            try:
+                self._last_price[symbol] = float(df["close"].iloc[-1])
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                if (now - pd.Timestamp(df.index[-1]).normalize()).days > 3:
+                    stale.append(symbol)
+            except Exception:  # noqa: BLE001
+                stale.append(symbol)
+        log.info("market_data_warmed",
+                 extra={"cached": len(self._history), "stale": len(stale)})
+        return stale
+
+    async def _backfill_async(self, symbols: list[str]) -> None:
+        """Network backfill for stale/missing symbols, off the boot path and off
+        the loop (P0.2 + P0.5). Best-effort per symbol."""
+        prefetch = getattr(self.source, "prefetch", None)
+        if prefetch is not None:
+            try:
+                await asyncio.to_thread(prefetch, symbols)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("prefetch_failed", extra={"error": str(exc)})
+        n = 0
+        for symbol in symbols:
+            try:
+                df = await asyncio.to_thread(self.source.poll, symbol)
+                upsert_bars(symbol, df)
+                self._history[symbol] = df
+                self._last_price[symbol] = float(df["close"].iloc[-1])
+                n += 1
+            except Exception as exc:  # noqa: BLE001
+                log.warning("backfill_failed", extra={"symbol": symbol, "error": str(exc)})
+        log.info("market_data_backfilled", extra={"symbols": n, "background": True})
+
     # --- polling -----------------------------------------------------------
+    @instrument("market_data", "poll_all")
     async def poll_all(self) -> None:
         if self._market_closed():
             return
+        from ats.core.config import get_settings
+
+        max_fail = get_settings().market_poll_max_consecutive_failures
+        consecutive = 0
         for symbol in self._symbols:
             try:
                 await self._poll_symbol(symbol)
-            except Exception as exc:  # noqa: BLE001
+                consecutive = 0
+            except Exception as exc:  # noqa: BLE001 (incl. asyncio.TimeoutError)
+                consecutive += 1
                 log.warning("poll_failed", extra={"symbol": symbol, "error": str(exc)})
+                # Circuit-break: on a bad-network stretch, abandon the rest of
+                # this cycle rather than let each symbol time out in turn (P0.2).
+                if consecutive >= max_fail:
+                    log.warning("poll_circuit_break", extra={"consecutive": consecutive})
+                    break
         await self._check_feed_degradation()
 
     async def _check_feed_degradation(self) -> None:
@@ -125,7 +182,15 @@ class MarketDataService:
 
     async def _poll_symbol(self, symbol: str) -> None:
         self._closed_logged = False
-        df = self.source.poll(symbol)
+        from ats.core.config import get_settings
+
+        # P0.2: the source poll is (potentially) a blocking network call —
+        # run it in a worker thread with a hard timeout so it can never stall
+        # the event loop (and thus every HTTP response) the way it used to.
+        timeout = get_settings().market_poll_timeout_s
+        df = await asyncio.wait_for(
+            asyncio.to_thread(self.source.poll, symbol), timeout=timeout
+        )
         added = upsert_bars(symbol, df)
         self._history[symbol] = df
         last_close = float(df["close"].iloc[-1])

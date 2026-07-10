@@ -50,6 +50,7 @@ def create_app() -> FastAPI:
     from ats.server.analytics_api import router as analytics_router
     from ats.server.api import router as control_router
     from ats.server.experts_api import router as experts_router
+    from ats.server.ops_api import router as ops_router
     from ats.server.research_api import router as research_router
     from ats.server.results_api import router as results_router
 
@@ -58,6 +59,7 @@ def create_app() -> FastAPI:
     app.include_router(research_router)
     app.include_router(results_router)
     app.include_router(analytics_router)
+    app.include_router(ops_router)
 
     # Dashboard (HTML + websocket) is mounted if present.
     with contextlib.suppress(Exception):
@@ -71,6 +73,25 @@ def create_app() -> FastAPI:
 
         app.add_middleware(TokenGateMiddleware, token=settings.dashboard_token)
         log.info("dashboard_token_gate_enabled")
+
+    # Perf telemetry (P0.1): time every request; slow ones land in /api/perf.
+    # Added last so it is the outermost middleware (captures full handler time).
+    import time as _time
+
+    @app.middleware("http")
+    async def _perf_timing(request, call_next):
+        start = _time.perf_counter()
+        response = await call_next(request)
+        ms = (_time.perf_counter() - start) * 1000.0
+        try:
+            from ats.core import perf
+
+            perf.record_request(request.method, request.url.path,
+                                response.status_code, ms)
+            response.headers["X-Response-Time-ms"] = f"{ms:.1f}"
+        except Exception:  # noqa: BLE001 — telemetry must never break a response
+            pass
+        return response
 
     return app
 

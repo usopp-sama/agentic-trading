@@ -6,8 +6,11 @@ full snapshot on a short cadence so the UI stays current without polling.
 
 from __future__ import annotations
 
+import asyncio
+
 from ats.core.events import Topic
 from ats.core.logging import get_logger
+from ats.core.telemetry import instrument
 from ats.server.hub import get_hub
 from ats.services.dashboard.snapshot import build_snapshot
 
@@ -27,6 +30,7 @@ class DashboardService:
     def __init__(self) -> None:
         self._hub = get_hub()
         self._orch = None
+        self._latest: dict | None = None   # cached snapshot (P0.4)
 
     async def start(self, ctx) -> None:
         self._orch = ctx.orchestrator
@@ -43,5 +47,17 @@ class DashboardService:
             {"type": "event", "topic": evt.topic, "payload": evt.payload, "ts": ts}
         )
 
+    @instrument("dashboard", "broadcast_snapshot")
     async def broadcast_snapshot(self) -> None:
-        await self._hub.broadcast({"type": "snapshot", "data": build_snapshot(self._orch)})
+        # Build off the loop (DB + service aggregation) and cache it, so the
+        # 5s tick never stalls the loop and GET /api/dashboard is O(1) (P0.4).
+        snap = await asyncio.to_thread(build_snapshot, self._orch)
+        self._latest = snap
+        await self._hub.broadcast({"type": "snapshot", "data": snap})
+
+    def snapshot(self) -> dict:
+        """The most recent cached snapshot (built by the broadcast tick); builds
+        one lazily on the very first call before any tick has run."""
+        if self._latest is None:
+            self._latest = build_snapshot(self._orch)
+        return self._latest

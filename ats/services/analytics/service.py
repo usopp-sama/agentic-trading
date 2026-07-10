@@ -14,6 +14,7 @@ data in and persists results out. Nothing here proposes a trade.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 
 import pandas as pd
@@ -22,6 +23,7 @@ from sqlalchemy import select
 from ats.core.db import session_scope
 from ats.core.logging import get_logger
 from ats.core.models import AnalyticsSnapshot
+from ats.core.telemetry import instrument
 from quant.analysis import intraday, patterns
 from quant.analysis.levels import classic_pivots, fibonacci_retracements, session_anchor
 from quant.analysis.summary import technical_summary
@@ -35,6 +37,9 @@ _PRESETS = {
     "quality": lambda r: _ge(r.get("f_score"), 7),
     "dividend": lambda r: _ge(r.get("dividend_yield"), 0.04) and _ge(r.get("f_score"), 7),
     "momentum": lambda r: _ge(r.get("tech_score"), 3) and _ge(r.get("near_high_pct"), -5),
+    # Fair-value verdicts (P1.3): the undervalued/overvalued surface.
+    "undervalued": lambda r: r.get("verdict") == "undervalued",
+    "overvalued": lambda r: r.get("verdict") == "overvalued",
 }
 
 
@@ -52,15 +57,23 @@ class AnalyticsService:
     def __init__(self) -> None:
         self._md = None
         self._orch = None
+        self._boot_task: asyncio.Task | None = None
         self._movers: dict = {"gainers": [], "losers": [], "volume_confirmed": []}
 
     async def start(self, ctx) -> None:
         self._md = ctx.orchestrator.get("market_data")
         self._orch = ctx.orchestrator
-        try:
-            self.run_close_pass()          # from stored history, no network
-        except Exception as exc:  # noqa: BLE001 — boot must not fail on analytics
-            log.warning("analytics_boot_pass_failed", extra={"error": str(exc)})
+
+        # P0.5: the boot close-pass (52-symbol compute) used to block startup on
+        # the loop. Run it off the boot path in a worker thread so the server
+        # starts listening immediately; snapshots fill in a beat later.
+        async def _boot_pass() -> None:
+            try:
+                await asyncio.to_thread(self.run_close_pass)
+            except Exception as exc:  # noqa: BLE001 — boot must not fail on analytics
+                log.warning("analytics_boot_pass_failed", extra={"error": str(exc)})
+
+        self._boot_task = asyncio.create_task(_boot_pass())
         try:
             from ats.services.market_data.calendar import IST
             tz = {"timezone": IST}
@@ -77,6 +90,7 @@ class AnalyticsService:
         log.info("analytics_started")
 
     # --- passes -----------------------------------------------------------------
+    @instrument("analytics", "close_pass")
     def run_close_pass(self) -> int:
         """Compute + persist a snapshot for every watchlist symbol."""
         n = 0
@@ -195,10 +209,17 @@ class AnalyticsService:
         """Filter the metrics table by a named preset (value/quality/dividend/
         momentum). Unknown/empty preset returns the full table."""
         rows = self.table()
-        pred = _PRESETS.get((preset or "").lower())
+        key = (preset or "").lower()
+        pred = _PRESETS.get(key)
         if pred is None:
             return rows
-        return [r for r in rows if pred(r)]
+        out = [r for r in rows if pred(r)]
+        # Valuation screens rank by margin of safety (cheapest / dearest first).
+        if key == "undervalued":
+            out.sort(key=lambda r: (r.get("mos_pct") if r.get("mos_pct") is not None else -1e9), reverse=True)
+        elif key == "overvalued":
+            out.sort(key=lambda r: (r.get("mos_pct") if r.get("mos_pct") is not None else 1e9))
+        return out
 
     def presets(self) -> list[str]:
         return list(_PRESETS.keys())

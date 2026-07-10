@@ -42,6 +42,12 @@
   </div>
 
   <div class="card span12 reveal">
+    <h2>Valuation · top undervalued</h2>
+    <p class="sub">Fair value (DCF) vs price, ranked by margin of safety — model estimates, click to open the chart</p>
+    <div id="valTop"><div class="empty">Fetch statements on the Screener page to populate fair value.</div></div>
+  </div>
+
+  <div class="card span12 reveal">
     <h2>Movers</h2>
     <p class="sub">Volume-confirmed movers only — a move counts when volume clears 1.5× its 20-day average</p>
     <div id="movers" style="display:flex;gap:24px;flex-wrap:wrap">
@@ -141,6 +147,17 @@
   A.fetchJSON("/api/opportunities?limit=6").then((d) => renderOpps(d.opportunities)).catch(() => {});
   A.fetchJSON("/api/digest?days=14").then((d) => renderDigest(d.digest)).catch(() => {});
   A.fetchJSON("/api/movers").then(renderMovers).catch(() => {});
+
+  function renderVal(rows) {
+    const el = document.getElementById("valTop");
+    rows = (rows || []).slice(0, 5);
+    if (!rows.length) { el.innerHTML = '<div class="empty">Fetch statements on the Screener page to populate fair value.</div>'; return; }
+    el.innerHTML = rows.map((r) =>
+      `<div class="newsrow" style="cursor:pointer" onclick="location.href='/charts?symbol=${encodeURIComponent(r.symbol)}'">
+        <div><div class="ttl">${A.esc(r.symbol)} <span class="pill green">${A.esc(r.verdict||'')}</span></div>
+        <div class="sub">MoS ${r.mos_pct==null?'–':r.mos_pct+'%'} · F ${r.f_score??'–'}/9 · ₹${r.price??'–'}</div></div></div>`).join("");
+  }
+  A.fetchJSON("/api/screener?preset=undervalued").then((d) => renderVal(d.rows)).catch(() => {});
 })();
 </script>
 {% endblock %}

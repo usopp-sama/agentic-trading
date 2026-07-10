@@ -38,6 +38,12 @@ class NlpService:
         self._bus = ctx.bus
         ctx.bus.subscribe(Topic.NEWS, self._on_news)
 
+    def sentiment_status(self) -> dict:
+        """The active sentiment backend for /api/health + the System page
+        (P1.2) — 'finbert' when the transformer weights are provisioned,
+        else 'vader' (lexical fallback, no torch)."""
+        return {"backend": getattr(self.model, "name", "unknown")}
+
     async def _on_news(self, evt) -> None:
         p = evt.payload
         tickers = p.get("tickers", [])

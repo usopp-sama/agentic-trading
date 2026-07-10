@@ -206,6 +206,7 @@ def mount_dashboard(app: FastAPI) -> None:
     app.add_api_route("/llm", page("llm.html", "llm"), response_class=HTMLResponse)
     app.add_api_route("/logs", page("logs.html", "logs"), response_class=HTMLResponse)
     app.add_api_route("/system", page("system.html", "system"), response_class=HTMLResponse)
+    app.add_api_route("/ops", page("ops.html", "ops"), response_class=HTMLResponse)
 
     # Legacy paths fold into System (pipeline/agents) or Today (overview).
     for old, target in {"/overview": "/", "/pipeline": "/system",
@@ -236,9 +237,23 @@ def mount_dashboard(app: FastAPI) -> None:
         # Served from root so the worker's scope covers the whole app.
         return PlainTextResponse(text, media_type="application/javascript")
 
+    @app.get("/api/perf")
+    def perf_snapshot():
+        """Live performance telemetry (P0.1): slow requests, event-loop lag,
+        and scheduled-job timings — the data behind 'why is it slow?'."""
+        from ats.core import perf
+
+        return perf.snapshot()
+
     @app.get("/api/dashboard")
     def dashboard_snapshot(request: Request):
-        return build_snapshot(getattr(request.app.state, "orchestrator", None))
+        # Serve the cached snapshot (refreshed every 5s off-loop by the
+        # DashboardService) instead of recomputing per request (P0.4).
+        orch = getattr(request.app.state, "orchestrator", None)
+        svc = orch.get("dashboard") if orch else None
+        if svc is not None and hasattr(svc, "snapshot"):
+            return svc.snapshot()
+        return build_snapshot(orch)
 
     @app.get("/api/wallpapers")
     def wallpapers():

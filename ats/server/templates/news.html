@@ -16,6 +16,21 @@
     </div>
   </div>
   <div class="card span12 reveal">
+    <div class="charttools" id="catBar" style="margin:0;flex-wrap:wrap;gap:6px">
+      <button data-cat="" class="primary">All</button>
+      <button data-cat="breaking">Breaking</button>
+      <button data-cat="stock_markets">Stock Markets</button>
+      <button data-cat="earnings">Earnings</button>
+      <button data-cat="analyst_ratings">Analyst Ratings</button>
+      <button data-cat="commodities">Commodities</button>
+      <button data-cat="currencies">Currencies</button>
+      <button data-cat="crypto">Crypto</button>
+      <button data-cat="economy">Economy</button>
+      <button data-cat="economic_indicators">Economic Indicators</button>
+      <button data-cat="ipo">IPO</button>
+    </div>
+  </div>
+  <div class="card span12 reveal">
     <h2>News outlet</h2>
     <p class="sub">Read here — no need to leave the dashboard</p>
     <div class="newslist" id="feed"><div class="empty">Loading…</div></div>
@@ -31,22 +46,38 @@
 <script>
 (function () {
   const A = window.ATS;
-  let sentiment = "", ticker = "";
+  let sentiment = "", ticker = "", category = "";
+  const CAT_LABEL = {"":"All", breaking:"Breaking", stock_markets:"Stock Markets",
+    earnings:"Earnings", analyst_ratings:"Analyst Ratings", commodities:"Commodities",
+    currencies:"Currencies", crypto:"Crypto", economy:"Economy",
+    economic_indicators:"Economic Indicators", ipo:"IPO"};
+
+  function updateCatCounts(counts) {
+    counts = counts || {};
+    document.querySelectorAll("#catBar button[data-cat]").forEach((b) => {
+      const c = b.dataset.cat;
+      const n = c ? (counts[c] || 0) : Object.values(counts).reduce((a, x) => a + x, 0);
+      b.textContent = CAT_LABEL[c] + (n ? ` (${n})` : "");
+      if (c === "breaking") b.classList.toggle("danger", n > 0);   // flag when hot
+    });
+  }
 
   async function load() {
     const q = new URLSearchParams({ limit: 60 });
     if (sentiment) q.set("sentiment", sentiment);
     if (ticker) q.set("ticker", ticker);
+    if (category) q.set("category", category);
     const d = await A.fetchJSON("/api/news?" + q.toString());
     const el = document.getElementById("feed");
     document.getElementById("newsCount").textContent = (d.total || 0) + " items";
+    updateCatCounts(d.counts);
     if (!d.news || !d.news.length) { el.innerHTML = '<div class="empty">No matching news.</div>'; return; }
     el.innerHTML = d.news.map((n) => {
       const s = (n.sentiment && n.sentiment.label) || "neutral";
       return `<div class="newsrow" data-id="${n.id}"><span class="sdot ${s}"></span><div style="flex:1">
         <div class="ttl">${A.esc(n.title)}</div>
         <div class="sub">${A.esc(n.source)} · ${(n.tickers||[]).map(A.esc).join(", ") || "—"} · ${A.ago(n.ts)} ago
-          ${n.event_type && n.event_type!=='general' ? '· <span class="tag">'+A.esc(n.event_type)+'</span>' : ''}</div>
+          ${n.category ? '· <span class="tag">'+A.esc((CAT_LABEL[n.category]||n.category))+'</span>' : ''}</div>
         <div class="sub" style="color:var(--text);opacity:.8">${A.esc(n.summary || "")}</div>
       </div></div>`;
     }).join("");
@@ -68,6 +99,11 @@
   document.getElementById("readerClose").onclick = () => document.getElementById("reader").classList.remove("open");
   document.querySelectorAll("#sentSeg button").forEach((b) => b.onclick = () => {
     sentiment = b.dataset.s; document.querySelectorAll("#sentSeg button").forEach((x) => x.classList.toggle("sel", x === b)); load();
+  });
+  document.querySelectorAll("#catBar button[data-cat]").forEach((b) => b.onclick = () => {
+    category = b.dataset.cat;
+    document.querySelectorAll("#catBar button[data-cat]").forEach((x) => x.classList.toggle("primary", x === b));
+    load();
   });
   const tf = document.getElementById("tickerFilter");
   tf.addEventListener("keydown", (e) => { if (e.key === "Enter") { ticker = tf.value.trim().toUpperCase(); load(); } });

@@ -53,16 +53,24 @@ def build_snapshot(orch) -> dict:
             for o in s.execute(select(SmeOpinion).order_by(SmeOpinion.id.desc()).limit(12)).scalars().all()
         ]
         # Recent news, with a flag + sentiment for items touching the watchlist.
-        raw_news = s.execute(select(NewsItem).order_by(NewsItem.id.desc()).limit(60)).scalars().all()
+        # The 5s broadcast only shows a handful; the /news page fetches its own
+        # full list. Fetch 15 and batch the sentiment lookup into ONE query
+        # (was an N+1 on the un-indexed news_id column) — P0.4.
+        raw_news = s.execute(select(NewsItem).order_by(NewsItem.id.desc()).limit(15)).scalars().all()
+        news_ids = [n.id for n in raw_news]
+        sent_by_news: dict[int, SentimentScore] = {}
+        if news_ids:
+            for sc in s.execute(
+                select(SentimentScore).where(SentimentScore.news_id.in_(news_ids))
+            ).scalars().all():
+                sent_by_news.setdefault(sc.news_id, sc)
         news, watchlist_news = [], []
         for n in raw_news:
             tickers = n.tickers or []
             relevant = [t for t in tickers if t in watchset]
             sent = None
             if relevant:
-                row = s.execute(
-                    select(SentimentScore).where(SentimentScore.news_id == n.id).limit(1)
-                ).scalar_one_or_none()
+                row = sent_by_news.get(n.id)
                 if row is not None:
                     sent = {"label": row.label, "score": round(row.score, 3)}
             item = {"ts": n.ts.isoformat(), "source": n.source, "title": n.title,

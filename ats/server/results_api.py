@@ -492,13 +492,16 @@ def news(request: Request,
          limit: int = Query(40, ge=1, le=100),
          offset: int = Query(0, ge=0, le=5000),
          ticker: str = Query("", max_length=24),
-         sentiment: str = Query("", max_length=12)):
+         sentiment: str = Query("", max_length=12),
+         category: str = Query("", max_length=32)):
     if ticker and not _valid_symbol(ticker):
         return {"error": "invalid ticker"}
     sentiment = sentiment.lower()
     if sentiment and sentiment not in {"positive", "negative", "neutral"}:
         return {"error": "invalid sentiment"}
+    category = category.lower().strip()
     items: list[dict] = []
+    counts: dict[str, int] = {}
     with session_scope() as s:
         q = select(NewsItem).order_by(NewsItem.id.desc()).limit(400)
         rows = s.execute(q).scalars().all()
@@ -512,19 +515,23 @@ def news(request: Request,
                 sent_by_news.setdefault(sc.news_id, {"label": sc.label, "score": round(sc.score, 3)})
         for n in rows:
             tickers = n.tickers or []
+            cat = n.category or "stock_markets"
+            counts[cat] = counts.get(cat, 0) + 1     # counts over the ticker/sentiment-unfiltered window
             if ticker and ticker not in tickers:
                 continue
             sent = sent_by_news.get(n.id)
             if sentiment and (not sent or sent["label"] != sentiment):
                 continue
+            if category and cat != category:
+                continue
             items.append({
                 "id": n.id, "ts": n.ts.isoformat() if n.ts else None, "source": n.source,
                 "title": n.title, "url": n.url, "tickers": tickers,
-                "event_type": n.event_type, "sentiment": sent,
+                "event_type": n.event_type, "category": cat, "sentiment": sent,
                 "summary": (n.body or "")[:240],
             })
     page = items[offset: offset + limit]
-    return {"news": page, "count": len(page), "total": len(items)}
+    return {"news": page, "count": len(page), "total": len(items), "counts": counts}
 
 
 @router.get("/news/{news_id}")

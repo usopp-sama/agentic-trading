@@ -13,7 +13,10 @@ from sqlalchemy import select
 
 from ats.core.config import get_settings
 from ats.core.db import session_scope
+from ats.core.logging import get_logger
 from ats.core.models import KvState, Position
+
+log = get_logger("ats.portfolio")
 
 PriceFn = Callable[[str], "float | None"]
 
@@ -58,6 +61,7 @@ def apply_fill(
     """
     side = side.upper()
     realized_delta = 0.0
+    eff_sell = 0
     with session_scope() as s:
         pos = s.execute(
             select(Position).where(
@@ -75,11 +79,25 @@ def apply_fill(
             pos.qty = new_qty
         else:  # SELL - clamp to holdings (long-only)
             sell_qty = min(qty, pos.qty)
+            eff_sell = sell_qty
             realized_delta = (price - pos.avg_price) * sell_qty
             pos.realized_pnl += realized_delta
             pos.qty -= sell_qty
             if pos.qty == 0:
                 pos.avg_price = 0.0
+
+    # Demat leg (P2): mirror the securities into the profile's depository account
+    # — the same effective qty that moved the position (so the three reconcile).
+    try:
+        from ats.services.accounts import demat
+
+        if side == "BUY":
+            demat.record_buy(account, symbol, qty, price)
+        elif eff_sell > 0:
+            demat.record_sell(account, symbol, eff_sell)
+    except Exception as exc:  # noqa: BLE001 — demat is a mirror; never break a fill
+        log.warning("demat_post_failed",
+                    extra={"account": account, "symbol": symbol, "error": str(exc)})
 
     if not update_cash:
         return {"realized_delta": round(realized_delta, 2), "cash": get_cash(account)}

@@ -83,6 +83,9 @@ def health(request: Request) -> dict:
         wd = orch.get("watchdog")
         if wd is not None and hasattr(wd, "status"):
             out["watchdog"] = wd.status()
+        nlp = orch.get("nlp")
+        if nlp is not None and hasattr(nlp, "sentiment_status"):
+            out["sentiment"] = nlp.sentiment_status()
 
     feed_degraded = bool(out.get("feed", {}).get("degraded"))
     if (not db_ok) or out["kill_switch"] or feed_degraded:

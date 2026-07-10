@@ -54,7 +54,26 @@ def get_session_factory() -> sessionmaker[Session]:
 
 def init_db() -> None:
     """Create all tables. Idempotent."""
-    Base.metadata.create_all(get_engine())
+    engine = get_engine()
+    Base.metadata.create_all(engine)
+    # create_all does not add indexes to tables that already exist, so add the
+    # ones introduced later explicitly (idempotent). P0.4: news_id was N+1'd.
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        for stmt in (
+            "CREATE INDEX IF NOT EXISTS ix_sentiment_scores_news_id "
+            "ON sentiment_scores (news_id)",
+            # P3: add the news category column to pre-existing DBs (ALTER is a
+            # no-op error when it already exists, swallowed below).
+            "ALTER TABLE news_items ADD COLUMN category VARCHAR(32) DEFAULT ''",
+            "CREATE INDEX IF NOT EXISTS ix_news_items_category "
+            "ON news_items (category)",
+        ):
+            try:
+                conn.execute(text(stmt))
+            except Exception:  # noqa: BLE001 — index creation is best-effort
+                pass
 
 
 @contextmanager

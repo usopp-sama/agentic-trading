@@ -14,6 +14,8 @@ options execution lands.
 
 from __future__ import annotations
 
+import asyncio
+
 from ats.core.config import get_settings
 from ats.core.events import EventBus, Topic
 from ats.core.logging import get_logger
@@ -62,7 +64,10 @@ class OptionsDataService:
             return
         ref = settings.regime_reference_symbol
         spot = self._md.latest_price(ref) if self._md is not None else None
-        summary = self.source.fetch(settings.option_chain_symbol, spot=spot)
+        # P0.2: option-chain fetch is blocking network — off the loop.
+        summary = await asyncio.to_thread(
+            self.source.fetch, settings.option_chain_symbol, spot=spot
+        )
         if summary is None:
             return
 

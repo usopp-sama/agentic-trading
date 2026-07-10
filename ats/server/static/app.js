@@ -9,7 +9,16 @@
     "exec.order": "execution", "exec.fill": "execution", "exec.approval_request": "execution",
   };
 
-  let ws = null, reconnectTimer = null;
+  let ws = null, reconnectTimer = null, lastSnap = null;
+
+  // P0.6: when the tab is backgrounded, stop running the (potentially heavy)
+  // page re-render handlers — just cache the latest snapshot and re-apply it
+  // once when the tab is shown again. Saves the laptop's browser CPU/RAM.
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && lastSnap) {
+      handlers.snapshot.forEach((fn) => safe(fn, lastSnap));
+    }
+  });
 
   function setDot(on) {
     const d = document.getElementById("wsdot");
@@ -25,14 +34,15 @@
     ws.onmessage = (m) => {
       let msg; try { msg = JSON.parse(m.data); } catch (e) { return; }
       if (msg.type === "snapshot") {
-        updateHeader(msg.data);
-        handlers.snapshot.forEach((fn) => safe(fn, msg.data));
+        updateHeader(msg.data);           // header stays live (cheap)
+        lastSnap = msg.data;
+        if (!document.hidden) handlers.snapshot.forEach((fn) => safe(fn, msg.data));
       } else if (msg.type === "recent") {
-        handlers.recent.forEach((fn) => safe(fn, msg));
+        if (!document.hidden) handlers.recent.forEach((fn) => safe(fn, msg));
       } else if (msg.type === "event") {
-        maybeToast(msg);
+        maybeToast(msg);                  // toasts + alert badge stay live
         collectAlert(msg);
-        handlers.event.forEach((fn) => safe(fn, msg));
+        if (!document.hidden) handlers.event.forEach((fn) => safe(fn, msg));
       }
     };
   }

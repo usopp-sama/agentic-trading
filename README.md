@@ -161,8 +161,29 @@ decisions, and alerts.
 
 Read/control APIs include `/api/health`, `/api/dashboard`, `/api/loops`, `/api/pipeline`,
 `/api/analytics`, `/api/analytics/{symbol}`, `/api/movers`, `/api/screener`,
-`/api/opportunities`, `POST /api/mode`, `POST /api/kill`. The dashboard installs as a
-**PWA** (`/manifest.webmanifest` + root-scoped `/sw.js`).
+`/api/opportunities`, `POST /api/mode`, `POST /api/kill`. There is also an **Ops
+Console** at `/ops` — the "engine room": per-component health (OK/IDLE/DEGRADED/
+DOWN), event-loop/perf telemetry, process resources, local-model status, and a
+review of every profile's bank + demat account, separate from the money views.
+
+### Running it as a desktop app (no Electron)
+
+A browser tab is heavier than it needs to be, but the right fix on this
+one-operator setup is **not** a second Chromium. Options, ranked:
+
+1. **Install the PWA (recommended).** The dashboard ships a web app manifest +
+   a root-scoped service worker, so Edge/Chrome on Windows 11 can install it as
+   a standalone, chromeless window with its own taskbar icon — sharing the
+   browser runtime that is already resident. Open `http://127.0.0.1:8000`, then
+   **⋯ → Apps → Install this site as an app** (or run
+   `msedge --app=http://127.0.0.1:8000`). Zero extra RAM beyond a tab.
+2. **`pywebview` / WebView2** (future) — a ~40-line native wrapper if a tray
+   icon / auto-start bundle is ever wanted; WebView2 also ships with Win 11.
+3. **Electron — rejected.** It bundles a *second* full Chromium (~300–500 MB
+   RSS + disk), re-adding exactly the cost we're trying to avoid.
+
+The client also pauses its heavy re-rendering when the tab is hidden, so the
+browser's steady-state cost stays low regardless of shell.
 
 ---
 
