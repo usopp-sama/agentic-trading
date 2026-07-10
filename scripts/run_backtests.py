@@ -63,7 +63,14 @@ def _wire_fundamentals(universe_strategies, fundamentals: dict[str, dict]) -> No
             setter(lambda f=fundamentals: f)
 
 
-def _load_panel(offline: bool, period: str, limit: int) -> dict[str, pd.DataFrame]:
+def _years_from_period(period: str) -> int:
+    try:
+        return max(1, int("".join(c for c in period if c.isdigit()) or "1"))
+    except ValueError:
+        return 1
+
+
+def _load_panel(offline: bool, period: str, limit: int, kite: bool = False) -> dict[str, pd.DataFrame]:
     with session_scope() as s:
         symbols = [r.symbol for r in s.query(Instrument).filter(
             Instrument.active.is_(True)).all()]
@@ -74,7 +81,18 @@ def _load_panel(offline: bool, period: str, limit: int) -> dict[str, pd.DataFram
                                   annual_drift=0.10, annual_vol=0.22)
             for sym in symbols
         }
-    frames = fetch_prices_batch(symbols, period=period)
+    if kite:
+        # Authenticated NSE candles — reliable where yfinance is throttled.
+        from ats.services.market_data.kite_history import (
+            KiteNotReady, fetch_prices_batch_kite,
+        )
+        try:
+            frames = fetch_prices_batch_kite(symbols, years=_years_from_period(period))
+        except KiteNotReady as exc:
+            print(f"  Kite not ready: {exc}")
+            return {}
+    else:
+        frames = fetch_prices_batch(symbols, period=period)
     missing = [s for s in symbols if s not in frames]
     if missing:
         print(f"  ({len(missing)} symbols had no live data, skipped)")
@@ -84,7 +102,8 @@ def _load_panel(offline: bool, period: str, limit: int) -> dict[str, pd.DataFram
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--offline", action="store_true", help="synthetic data (no network)")
-    ap.add_argument("--period", default="3y", help="yfinance history window")
+    ap.add_argument("--kite", action="store_true", help="authenticated Kite NSE history (needs creds + token)")
+    ap.add_argument("--period", default="3y", help="history window (e.g. 1y, 3y)")
     ap.add_argument("--limit", type=int, default=750, help="bars for the synthetic panel")
     ap.add_argument("--dsr", type=float, default=None, help="deflated-Sharpe bar (default 0.90)")
     ap.add_argument("--min-obs", type=int, default=30, help="min active observations")
@@ -99,9 +118,9 @@ def main() -> None:
     settings = get_settings()
     dsr = args.dsr if args.dsr is not None else 0.90
 
-    panel = _load_panel(args.offline, args.period, args.limit)
-    print(f"Loaded history for {len(panel)} instruments "
-          f"(source={'synthetic' if args.offline else 'yfinance'})\n")
+    panel = _load_panel(args.offline, args.period, args.limit, kite=args.kite)
+    src = "synthetic" if args.offline else "kite" if args.kite else "yfinance"
+    print(f"Loaded history for {len(panel)} instruments (source={src})\n")
 
     universe_strategies = default_universe_strategies()
     _wire_fundamentals(universe_strategies, _build_fundamentals(list(panel.keys())))
