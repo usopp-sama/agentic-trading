@@ -45,8 +45,10 @@ def test_score_in_unit_range():
 def test_forced_finbert_falls_back_to_vader_when_weights_unavailable():
     # Default finbert_download=False -> load is local-cache-only. With no cached
     # weights (and/or no transformers), forcing FinBERT must degrade to VADER
-    # rather than crash or hit the network.
-    model = SentimentModel(model=FINBERT)
+    # rather than crash or hit the network. A bogus model id guarantees the
+    # local-only load fails regardless of what's cached on this machine (so the
+    # test is deterministic even where real FinBERT weights are provisioned).
+    model = SentimentModel(model=FINBERT, finbert_model="ats-test/nonexistent-model")
     assert model.name == "vader"
     label, _ = model.score("Earnings beat expectations")
     assert label in {"positive", "negative", "neutral"}
