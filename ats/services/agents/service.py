@@ -20,6 +20,7 @@ from sqlalchemy import select
 from ats.core.db import session_scope
 from ats.core.events import EventBus, Topic
 from ats.core.logging import get_logger
+from ats.core.telemetry import instrument
 from ats.core.models import SmeTrackRecord
 from ats.core.schemas import Opinion, ProposedPosition
 from ats.services.agents.cio import CIO
@@ -227,6 +228,7 @@ class AgentService:
         except Exception as exc:  # noqa: BLE001 - macro refresh is best-effort
             log.warning("macro_refresh_on_news_failed", extra={"error": str(exc)})
 
+    @instrument("agents", "macro_sweep")
     async def _scheduled_macro_sweep(self) -> None:
         """Periodic macro refresh, gated to the NSE session. News arriving at
         any hour still triggers a macro re-read via ``_maybe_refresh_macro_from_news``;

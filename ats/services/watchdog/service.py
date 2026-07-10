@@ -26,6 +26,7 @@ from ats.core import state
 from ats.core.config import get_settings
 from ats.core.events import EventBus, Topic
 from ats.core.logging import get_logger
+from ats.core.telemetry import instrument
 from ats.services.execution.notify import notify
 from ats.services.market_data.calendar import is_market_open
 
@@ -113,6 +114,7 @@ class WatchdogService:
             return True  # synthetic ticks around the clock
         return is_market_open()
 
+    @instrument("watchdog", "check_once")
     async def check_once(self) -> WatchdogVerdict:
         settings = get_settings()
         verdict = self.monitor.check(time.monotonic(), self._feed_expected())

@@ -93,3 +93,16 @@ def test_ops_page_and_nav_render():
     c = TestClient(create_app())
     assert "engine room" in c.get("/ops").text
     assert ">Ops<" in c.get("/").text
+    assert "System map" in c.get("/ops").text     # P4-polish: animated map present
+
+
+def test_ops_subpages_and_legacy_redirects():
+    c = TestClient(create_app())
+    # relocated sub-pages render under /ops
+    for path in ("/ops/system", "/ops/logs", "/ops/llm"):
+        assert c.get(path).status_code == 200
+    # legacy paths redirect into /ops (TestClient follows -> 200)
+    assert c.get("/system").status_code == 200
+    assert c.get("/logs").status_code == 200
+    # and they no longer clutter the main nav
+    assert ">System<" not in c.get("/").text and ">Logs<" not in c.get("/").text

@@ -19,6 +19,7 @@ import asyncio
 from ats.core.config import get_settings
 from ats.core.events import EventBus, Topic
 from ats.core.logging import get_logger
+from ats.core.telemetry import instrument
 from ats.services.market_data.calendar import is_polling_window
 from ats.services.market_data.option_chain import build_option_chain_source
 from quant.analysis.indicators import annualized_volatility
@@ -50,6 +51,7 @@ class OptionsDataService:
             coalesce=True,
         )
 
+    @instrument("options_data", "poll")
     async def poll(self) -> None:
         settings = get_settings()
         # The option-chain IV/PCR snapshot is only meaningful during the NSE

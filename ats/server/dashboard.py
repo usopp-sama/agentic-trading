@@ -203,14 +203,16 @@ def mount_dashboard(app: FastAPI) -> None:
     app.add_api_route("/activity", page("activity.html", "activity"), response_class=HTMLResponse)
     app.add_api_route("/news", page("news.html", "news"), response_class=HTMLResponse)
     app.add_api_route("/experts", page("experts.html", "experts"), response_class=HTMLResponse)
-    app.add_api_route("/llm", page("llm.html", "llm"), response_class=HTMLResponse)
-    app.add_api_route("/logs", page("logs.html", "logs"), response_class=HTMLResponse)
-    app.add_api_route("/system", page("system.html", "system"), response_class=HTMLResponse)
+    # Ops Console + its sub-pages (P4 polish: logs/llm/system live under /ops).
     app.add_api_route("/ops", page("ops.html", "ops"), response_class=HTMLResponse)
+    app.add_api_route("/ops/system", page("system.html", "ops"), response_class=HTMLResponse)
+    app.add_api_route("/ops/logs", page("logs.html", "ops"), response_class=HTMLResponse)
+    app.add_api_route("/ops/llm", page("llm.html", "ops"), response_class=HTMLResponse)
 
-    # Legacy paths fold into System (pipeline/agents) or Today (overview).
-    for old, target in {"/overview": "/", "/pipeline": "/system",
-                        "/agents": "/system"}.items():
+    # Legacy paths 308-redirect to their new homes.
+    for old, target in {"/overview": "/", "/pipeline": "/ops/system",
+                        "/agents": "/ops/system", "/system": "/ops/system",
+                        "/logs": "/ops/logs", "/llm": "/ops/llm"}.items():
         app.add_api_route(old, _redirect(target), response_class=RedirectResponse)
 
     # --- PWA (QA-11): installable dashboard over LAN/VPN ---------------------

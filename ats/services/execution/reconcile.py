@@ -30,6 +30,7 @@ from ats.core.config import get_settings
 from ats.core.db import session_scope
 from ats.core.events import Topic
 from ats.core.logging import get_logger
+from ats.core.telemetry import instrument
 from ats.core.models import Fill, LedgerEntry, Order, Position
 from ats.services.accounts.ledger import AccountLedger
 
@@ -197,6 +198,7 @@ class ReconciliationService:
             out += [(a, True) for a in league.accounts()]
         return out
 
+    @instrument("reconcile", "run_sync")
     def run_sync(self) -> dict:
         results = []
         league = self._orch.get("league") if self._orch else None
