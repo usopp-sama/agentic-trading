@@ -11,8 +11,17 @@ live trading (that stays behind the real-money gate, untouched).
    **API key** and **API secret**.
 2. Subscribe to Kite Connect and enable the **Historical Data** add-on (the
    `historical_data` endpoint requires it).
-3. Set a **Redirect URL** on the app (e.g. `http://127.0.0.1:8000/` — you only
-   need to read the `request_token` it appends to the URL).
+3. Set the app's **Redirect URL** to exactly:
+
+   ```
+   http://127.0.0.1:8000/kite/callback
+   ```
+
+   This is a real route in the running dashboard — Zerodha sends the browser
+   back there with `?request_token=…`, and the dashboard exchanges it for the
+   access token automatically. (No port clash: it's the same server catching a
+   browser redirect, not a second service.) If the dashboard runs on a
+   different host/port, match it here.
 4. Install the client:
 
    ```powershell
@@ -29,19 +38,25 @@ live trading (that stays behind the real-money gate, untouched).
 ## 2. Daily: get an access token
 
 Kite access tokens expire every morning (~6 AM IST), so this is a once-a-day
-step:
+step. Two ways:
+
+**A) One click from the dashboard (recommended).** With the server running,
+open the **Ops Console** (`/ops`) → the **Kite** card → **Login with Zerodha**.
+Log in; Zerodha redirects to `/kite/callback`, the dashboard exchanges the
+`request_token`, and stores the access token at runtime (in the DB) — so it
+works immediately *and* the backtest process picks it up. The card flips to
+`token active`. Nothing to copy-paste. (The success page also shows the
+`ATS_KITE_ACCESS_TOKEN=…` line if you'd like to add it to `.env` so it survives
+a restart.)
+
+**B) Command line.** If you're not running the server:
 
 ```powershell
 .venv/Scripts/python -m scripts.kite_login
 ```
 
-It prints a login URL → open it, log in, and you'll be redirected to your
-app's Redirect URL with `?request_token=XXXX` in the address bar. Paste that
-token back into the prompt; it prints the line to add to `.env`:
-
-```
-ATS_KITE_ACCESS_TOKEN=the_generated_token
-```
+It prints a login URL → log in → paste the `request_token` from the redirect
+URL back into the prompt; it prints `ATS_KITE_ACCESS_TOKEN=…` to add to `.env`.
 
 ## 3. Backtest every strategy on Kite history
 

@@ -25,10 +25,50 @@ from ats.core.logging import get_logger
 log = get_logger("ats.kite_history")
 
 _KITE_RATE_S = 0.34   # Kite historical API allows ~3 requests/second
+_TOKEN_KEY = "kite:access_token"   # runtime store (shared across processes via DB)
 
 
 class KiteNotReady(RuntimeError):
     """kiteconnect missing or credentials/token not configured."""
+
+
+# --- access token (runtime store) ------------------------------------------
+# The daily token can arrive two ways: the web /kite/callback route (which
+# writes it here, to the DB) or ATS_KITE_ACCESS_TOKEN in .env. The DB store
+# wins so a fresh login through the dashboard takes effect immediately — and,
+# because it is in the DB, the separate backtest process reads the same token.
+
+def set_access_token(token: str) -> None:
+    from ats.core import state
+
+    state.set_kv(_TOKEN_KEY, {"token": token, "ts": time.time()})
+
+
+def get_access_token() -> str:
+    from ats.core import state
+
+    kv = state.get_kv(_TOKEN_KEY) or {}
+    return (kv.get("token") or "") or get_settings().kite_access_token
+
+
+def login_url() -> str:
+    """The Zerodha login URL for this app's api_key (no kiteconnect needed)."""
+    return f"https://kite.zerodha.com/connect/login?v=3&api_key={get_settings().kite_api_key}"
+
+
+def exchange_request_token(request_token: str) -> str:  # pragma: no cover - network
+    """Exchange a Kite ``request_token`` (from the redirect) for an access token."""
+    s = get_settings()
+    if not (s.kite_api_key and s.kite_api_secret):
+        raise KiteNotReady("set ATS_KITE_API_KEY + ATS_KITE_API_SECRET first")
+    try:
+        from kiteconnect import KiteConnect
+    except Exception as exc:  # noqa: BLE001
+        raise KiteNotReady(f"kiteconnect not installed ({exc}); pip install kiteconnect") from exc
+    data = KiteConnect(api_key=s.kite_api_key).generate_session(
+        request_token, api_secret=s.kite_api_secret
+    )
+    return data["access_token"]
 
 
 def nse_symbol(symbol: str) -> str | None:
@@ -41,15 +81,17 @@ def nse_symbol(symbol: str) -> str | None:
 def build_kite():  # pragma: no cover - needs the kiteconnect dep + live creds
     """A ready ``KiteConnect`` with the access token set, or raise KiteNotReady."""
     s = get_settings()
-    if not (s.kite_api_key and s.kite_access_token):
-        raise KiteNotReady("set ATS_KITE_API_KEY + ATS_KITE_ACCESS_TOKEN "
-                           "(run scripts/kite_login.py for the token)")
+    token = get_access_token()
+    if not (s.kite_api_key and token):
+        raise KiteNotReady("set ATS_KITE_API_KEY + a daily access token "
+                           "(log in via /kite/login on the dashboard, or run "
+                           "scripts/kite_login.py)")
     try:
         from kiteconnect import KiteConnect
     except Exception as exc:  # noqa: BLE001
         raise KiteNotReady(f"kiteconnect not installed ({exc}); pip install kiteconnect") from exc
     kite = KiteConnect(api_key=s.kite_api_key)
-    kite.set_access_token(s.kite_access_token)
+    kite.set_access_token(token)
     return kite
 
 

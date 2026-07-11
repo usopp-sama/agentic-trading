@@ -239,6 +239,74 @@ def mount_dashboard(app: FastAPI) -> None:
         # Served from root so the worker's scope covers the whole app.
         return PlainTextResponse(text, media_type="application/javascript")
 
+    # --- Kite login (one-click daily token via the running dashboard) --------
+    def _kite_page(msg: str, ok: bool, token: str = "") -> str:
+        env_line = (f'<p>For it to survive a restart, also add to <code>.env</code>:'
+                    f'<br><code>ATS_KITE_ACCESS_TOKEN={token}</code></p>') if token else ""
+        colour = "#34d399" if ok else "#fb7185"
+        return (
+            f"<!doctype html><meta charset=utf-8><title>Kite login</title>"
+            f"<body style='font-family:system-ui;max-width:640px;margin:60px auto;"
+            f"padding:24px;background:#0c1118;color:#e8eef5'>"
+            f"<h2 style='color:{colour}'>{'✓ Kite connected' if ok else '⚠ Kite login'}</h2>"
+            f"<p>{msg}</p>{env_line}"
+            f"<p style='margin-top:24px'><a style='color:#2dd4bf' href='/ops'>← Back to Ops Console</a></p>"
+            f"</body>"
+        )
+
+    @app.get("/kite/login")
+    def kite_login(request: Request):
+        """Redirect to the Zerodha login page for this app's api_key."""
+        from ats.core.config import get_settings
+        from ats.services.market_data.kite_history import login_url
+
+        if not get_settings().kite_api_key:
+            return HTMLResponse(_kite_page(
+                "Set ATS_KITE_API_KEY / ATS_KITE_API_SECRET in .env first "
+                "(see docs/kite_setup.md), then reload this.", ok=False))
+        return RedirectResponse(login_url(), status_code=302)
+
+    @app.get("/kite/callback")
+    def kite_callback(request: Request):
+        """Catch Zerodha's redirect: exchange request_token -> access_token and
+        store it at runtime (used immediately + by the backtest process)."""
+        request_token = request.query_params.get("request_token", "").strip()
+        if not request_token:
+            return HTMLResponse(_kite_page(
+                "No request_token in the redirect — start again from "
+                "<a style='color:#2dd4bf' href='/kite/login'>Login with Zerodha</a>.",
+                ok=False))
+        try:
+            from ats.services.market_data.kite_history import (
+                exchange_request_token,
+                set_access_token,
+            )
+
+            token = exchange_request_token(request_token)
+            set_access_token(token)
+        except Exception as exc:  # noqa: BLE001
+            return HTMLResponse(_kite_page(f"Token exchange failed: {exc}", ok=False))
+        return HTMLResponse(_kite_page(
+            "Historical data is ready. Run the backtest: "
+            "<code>python scripts/run_backtests.py --kite --period 1y</code>",
+            ok=True, token=token))
+
+    @app.get("/api/kite/status")
+    def kite_status():
+        from ats.core.config import get_settings
+        from ats.services.market_data.kite_history import get_access_token
+
+        s = get_settings()
+        try:
+            tok = get_access_token()
+        except Exception:  # noqa: BLE001
+            tok = ""
+        return {
+            "has_creds": bool(s.kite_api_key and s.kite_api_secret),
+            "has_token": bool(tok),
+            "callback": "/kite/callback",
+        }
+
     @app.get("/api/perf")
     def perf_snapshot():
         """Live performance telemetry (P0.1): slow requests, event-loop lag,

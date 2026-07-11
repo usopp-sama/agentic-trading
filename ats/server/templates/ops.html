@@ -40,6 +40,12 @@
   </div>
 
   <div class="card span12 reveal">
+    <h2>Kite (historical data)</h2>
+    <p class="sub">One-click daily login for authenticated NSE history — read-only, live trading stays gated. Register this exact <b>Redirect URL</b> in your Kite app: <code id="kiteCb">http://127.0.0.1:8000/kite/callback</code></p>
+    <div id="kiteBox"><div class="empty">Loading…</div></div>
+  </div>
+
+  <div class="card span12 reveal">
     <h2>Accounts &amp; demat</h2>
     <p class="sub">Every profile (main + league solos): bank cash + demat holdings (settled / pending T+1)</p>
     <div class="scroll"><table id="acctTable"><thead><tr>
@@ -186,7 +192,23 @@
         <td class="r">${s.ms}</td><td><span class="pill ${oc[s.outcome] || 'gray'}">${esc(s.outcome)}</span></td></tr>`).join("");
   }
 
-  function refresh() { loadSysMap(); loadHealth(); loadResources(); loadPerf(); loadModels(); loadAccounts(); loadTelemetry(); }
+  async function loadKite() {
+    const k = await get("/api/kite/status"); const el = document.getElementById("kiteBox");
+    if (!k) { el.innerHTML = '<div class="empty">–</div>'; return; }
+    if (!k.has_creds) {
+      el.innerHTML = '<div class="sub">No API credentials yet. Add <code>ATS_KITE_API_KEY</code> + <code>ATS_KITE_API_SECRET</code> to <code>.env</code> (see <a href="/ops">docs/kite_setup.md</a>), then reload.</div>';
+      return;
+    }
+    const tokPill = k.has_token
+      ? '<span class="pill green">token active</span>'
+      : '<span class="pill amber">no token — log in</span>';
+    el.innerHTML = `<div class="row-between">
+      <div>Credentials set ${tokPill} <span class="muted" style="font-size:12px">· tokens expire ~6 AM IST daily</span></div>
+      <a href="/kite/login" class="pill accent" style="text-decoration:none">↦ Login with Zerodha</a>
+    </div>`;
+  }
+
+  function refresh() { loadSysMap(); loadHealth(); loadResources(); loadPerf(); loadModels(); loadKite(); loadAccounts(); loadTelemetry(); }
   refresh();
   setInterval(refresh, 5000);
 })();
