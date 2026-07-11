@@ -159,3 +159,150 @@ class MarketauxCollector:  # pragma: no cover - requires API key + network
             }
             for d in data
         ]
+
+
+# --- keyed news APIs (P-news): three free-tier sources, each self-throttled ---
+# The scraper polls every ~300s (≈288/day); each collector gates itself to its
+# own daily budget and bumps a per-source kv counter so the Ops Console can
+# show credits used today. All degrade to [] on any failure.
+
+def _bump_credit(name: str) -> None:
+    try:
+        from datetime import date as _date
+
+        from ats.core import state
+
+        key = "news_credits"
+        cur = state.get_kv(key)
+        today = _date.today().isoformat()
+        if cur.get("day") != today:
+            cur = {"day": today}
+        cur[name] = int(cur.get(name, 0)) + 1
+        state.set_kv(key, cur)
+    except Exception:  # noqa: BLE001 — accounting must never break collection
+        pass
+
+
+class _KeyedApiCollector:  # pragma: no cover - network in collect(); _parse is tested
+    """Shared throttle + fetch scaffolding for the keyed news APIs."""
+
+    name = "keyed"
+
+    def __init__(self, api_key: str, min_interval_s: float) -> None:
+        self._key = api_key
+        self._min_interval = max(0.0, float(min_interval_s))
+        self._last_call: float | None = None
+
+    def _throttled(self) -> bool:
+        import time
+
+        now = time.monotonic()
+        if self._last_call is not None and (now - self._last_call) < self._min_interval:
+            return True
+        self._last_call = now
+        return False
+
+    def _get(self, url: str, params: dict) -> dict | None:
+        import httpx
+
+        try:
+            resp = httpx.get(url, params=params, timeout=15.0)
+            resp.raise_for_status()
+            _bump_credit(self.name)
+            return resp.json()
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"{self.name}_failed", extra={"error": str(exc)})
+            return None
+
+
+class NewsApiCollector(_KeyedApiCollector):
+    """newsapi.org — 100 req/day free; throttle ≈96/day (15 min)."""
+
+    name = "newsapi"
+
+    def __init__(self, api_key: str, min_interval_s: float = 900.0) -> None:
+        super().__init__(api_key, min_interval_s)
+
+    def collect(self) -> list[dict]:  # pragma: no cover - network
+        if self._throttled():
+            return []
+        data = self._get(
+            "https://newsapi.org/v2/top-headlines",
+            {"country": "in", "category": "business", "pageSize": 20, "apiKey": self._key},
+        )
+        return self._parse(data) if data else []
+
+    @staticmethod
+    def _parse(data: dict) -> list[dict]:
+        out = []
+        for a in data.get("articles", []) or []:
+            out.append({
+                "source": f"newsapi:{(a.get('source') or {}).get('name', '')}",
+                "url": a.get("url", "") or "",
+                "title": a.get("title", "") or "",
+                "body": a.get("description", "") or a.get("content", "") or "",
+                "ts": a.get("publishedAt", datetime.now(timezone.utc).isoformat()),
+            })
+        return out
+
+
+class NewsDataCollector(_KeyedApiCollector):
+    """newsdata.io — 200 credits/day free (12 h delayed); throttle ≈96/day."""
+
+    name = "newsdata"
+
+    def __init__(self, api_key: str, min_interval_s: float = 900.0) -> None:
+        super().__init__(api_key, min_interval_s)
+
+    def collect(self) -> list[dict]:  # pragma: no cover - network
+        if self._throttled():
+            return []
+        data = self._get(
+            "https://newsdata.io/api/1/latest",
+            {"apikey": self._key, "country": "in", "category": "business", "language": "en"},
+        )
+        return self._parse(data) if data else []
+
+    @staticmethod
+    def _parse(data: dict) -> list[dict]:
+        out = []
+        for a in data.get("results", []) or []:
+            out.append({
+                "source": f"newsdata:{a.get('source_id', '')}",
+                "url": a.get("link", "") or "",
+                "title": a.get("title", "") or "",
+                "body": a.get("description", "") or "",
+                "ts": a.get("pubDate", datetime.now(timezone.utc).isoformat()),
+            })
+        return out
+
+
+class CurrentsCollector(_KeyedApiCollector):
+    """currentsapi.services — free tier; throttle ≈144/day (10 min)."""
+
+    name = "currents"
+
+    def __init__(self, api_key: str, min_interval_s: float = 600.0) -> None:
+        super().__init__(api_key, min_interval_s)
+
+    def collect(self) -> list[dict]:  # pragma: no cover - network
+        if self._throttled():
+            return []
+        data = self._get(
+            "https://api.currentsapi.services/v1/latest-news",
+            {"apiKey": self._key, "country": "IN", "category": "business", "language": "en"},
+        )
+        return self._parse(data) if data else []
+
+    @staticmethod
+    def _parse(data: dict) -> list[dict]:
+        out = []
+        for a in data.get("news", []) or []:
+            out.append({
+                "source": f"currents:{a.get('author', '') or 'wire'}",
+                "url": a.get("url", "") or "",
+                "title": a.get("title", "") or "",
+                "body": a.get("description", "") or "",
+                "ts": a.get("published", datetime.now(timezone.utc).isoformat()),
+            })
+        return out

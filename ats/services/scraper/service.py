@@ -75,6 +75,19 @@ class ScraperService:
             collectors.append(
                 MarketauxCollector(settings.marketaux_api_key, settings.marketaux_min_interval_s)
             )
+        # Keyed news APIs (P-news): each self-throttles to its daily budget.
+        from ats.services.scraper.collectors import (
+            CurrentsCollector,
+            NewsApiCollector,
+            NewsDataCollector,
+        )
+
+        if settings.newsapi_api_key:
+            collectors.append(NewsApiCollector(settings.newsapi_api_key))
+        if settings.newsdata_api_key:
+            collectors.append(NewsDataCollector(settings.newsdata_api_key))
+        if settings.currents_api_key:
+            collectors.append(CurrentsCollector(settings.currents_api_key))
         collectors.append(RssCollector())
 
         # Mock is only an offline safety net - used when live feeds return

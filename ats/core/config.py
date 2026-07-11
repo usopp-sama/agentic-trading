@@ -333,6 +333,11 @@ class Settings(BaseSettings):
     # (1200s = ~72/day, comfortably under the cap). RSS feeds still run every
     # poll. Raise the cap by lowering this only if you have a paid plan.
     marketaux_min_interval_s: int = 1200
+    # Keyed news APIs (P-news): each self-throttles to its free-tier daily
+    # budget; all optional — RSS keeps running regardless.
+    newsapi_api_key: str = Field(default="", repr=False)        # newsapi.org, 100/day
+    newsdata_api_key: str = Field(default="", repr=False)       # newsdata.io, 200 credits/day (12h delay)
+    currents_api_key: str = Field(default="", repr=False)       # currentsapi.services
 
     # --- Watchdog (dead-man's switch; roadmap Part 10) ---
     watchdog_interval_s: int = 60

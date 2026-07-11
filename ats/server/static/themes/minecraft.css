@@ -105,3 +105,8 @@
   box-shadow:inset 2px 2px 0 rgba(255,255,255,.12), inset -2px -2px 0 rgba(0,0,0,.5)}
 
 [data-theme="minecraft"] table th{font-family:var(--font-display);font-size:9px;text-transform:uppercase}
+
+/* Theme segment: 4 chunky beveled buttons overflow the popover — wrap them
+   into a 2x2 grid and slim the padding so nothing escapes the box. */
+[data-theme="minecraft"] .popover .seg{flex-wrap:wrap}
+[data-theme="minecraft"] .popover .seg button{flex:1 1 44%;padding:4px 6px;font-size:11px;white-space:nowrap}
