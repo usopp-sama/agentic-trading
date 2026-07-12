@@ -22,8 +22,9 @@ from ats.services.email.transport import email_configured, send_email
 
 log = get_logger("ats.email.service")
 
-# ALERT kinds already delivered by the watchdog via notify() — don't re-email.
-_SKIP_KINDS = {"watchdog"}
+# ALERT kinds already delivered via notify() (watchdog feed staleness,
+# component-health transitions) — skip here so they aren't emailed twice.
+_SKIP_KINDS = {"watchdog", "health"}
 
 
 def format_alert(payload: dict) -> tuple[str, str]:

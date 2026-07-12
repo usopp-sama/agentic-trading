@@ -47,9 +47,12 @@ README roadmap mapping.
 
 ### 1.3 Deferred (until earned)
 
-- ⏳ **Zerodha Kite adapter** — `KiteDataSource` + execution adapter are
-  intentional stubs behind `ATS_REAL_MONEY_ENABLED`; open only after the paper
-  track record justifies it. `kiteconnect` stays commented in prod requirements.
+- ✅ **Zerodha Kite market data (read-only)** — `KiteLiveSource`
+  (`ATS_DATA_SOURCE=kite`): batched live quotes + daily/intraday candles, needs
+  only a daily token, degrades to nse_live. `kiteconnect` optional at runtime.
+- ⏳ **Zerodha Kite execution adapter** — order path is an intentional stub
+  behind `ATS_REAL_MONEY_ENABLED`; open only after the paper track record
+  justifies it. `kiteconnect` stays optional in prod requirements.
 - ⏳ **Real-money execution path** — same gate; paper-only by design for now.
 
 ---

@@ -160,12 +160,35 @@ L3/L4/L5 *during* the run (they don't touch the trade path).
 
 ## 5. Sequencing
 
-| # | Item | Effort | Gate |
-|---|---|---|---|
-| 1 | L1 credits panels | 0.5 d | news + LLM burn visible on /ops |
-| 2 | L2 Kite live source | 1.5 d | `ATS_DATA_SOURCE=kite` polls the session; falls back cleanly |
-| 3 | L6 hardening | 1 d | GO/NO-GO email fires at 08:45 IST |
-| — | **Start 1-week paper run** | — | mode PAPER, small sizing, league on |
-| 4 | L3 portfolio + Zerodha console | 2 d | live LTP rows, click-to-chart, Kite funds visible |
-| 5 | L4 ops on :8001 | 1.5 d | two UIs, ops gated |
-| 6 | L5 users + login | 3 d | friend logs in, sees only their paper book |
+| # | Item | Effort | Gate | Status |
+|---|---|---|---|---|
+| 1 | L1 credits panels | 0.5 d | news + LLM burn visible on /ops | ✅ done |
+| 2 | L2 Kite live source | 1.5 d | `ATS_DATA_SOURCE=kite` polls the session; falls back cleanly | ✅ done |
+| 3 | L6 hardening | 1 d | GO/NO-GO email fires at 08:45 IST | ✅ done |
+| — | **Start 1-week paper run** | — | mode PAPER, small sizing, league on | ← next |
+| 4 | L3 portfolio + Zerodha console | 2 d | live LTP rows, click-to-chart, Kite funds visible | ⏳ |
+| 5 | L4 ops on :8001 | 1.5 d | two UIs, ops gated | ⏳ |
+| 6 | L5 users + login | 3 d | friend logs in, sees only their paper book | ⏳ |
+
+## 6. Build log (this session)
+
+The three pre-run workstreams are built, tested (573 pass), and verified on a
+live boot:
+
+- **L1** — `GET /api/ops/news-credits` (per-source used/budget) + `GET
+  /api/ops/llm-budget` (month-to-date vs cap), with two burn-down cards on
+  `/ops` next to Local models. Verified live in the preview.
+- **L2** — `KiteLiveSource` (`ats/services/market_data/sources.py`): daily
+  `historical_data` with the last bar overlaid by a **batched** `quote()` LTP
+  call (≤500/call), minute candles, and Kite→nse_live→synthetic fallback so the
+  feed is never dead at 9:15. `ATS_DATA_SOURCE=kite` wired; degrades cleanly
+  when `kiteconnect`/token are absent. Pure helpers unit-tested.
+- **L6** — watchdog now edge-alerts on any service DEGRADED/DOWN
+  (`diff_health` + `check_component_health`); a daily 08:45 IST
+  `PreOpenCheckService` emails a GO/NO-GO readiness sweep (feed/kite-token/disk/
+  budget/kill-switch); `scripts/backup.py` takes WAL-consistent nightly SQLite
+  snapshots (Task Scheduler line in README).
+
+**Operator note:** the stale-UI bug (§0) was confirmed again this session — a
+v1 service worker was still serving cached HTML in the browser. One
+**Ctrl+Shift+R** (or unregister the SW once) clears it for good.

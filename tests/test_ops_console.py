@@ -89,6 +89,38 @@ def test_ops_endpoints():
     assert "accounts" in a
 
 
+def test_ops_news_credits_and_llm_budget(monkeypatch):
+    from ats.core import state
+
+    # Seed today's per-source counters; the endpoint pairs them with budgets.
+    from datetime import date
+    monkeypatch.setattr(state, "get_kv",
+                        lambda k, d=None: {"day": date.today().isoformat(),
+                                           "newsapi": 7, "newsdata": 3} if k == "news_credits" else (d or {}))
+    c = TestClient(create_app())
+
+    nc = c.get("/api/ops/news-credits").json()
+    by = {s["source"]: s for s in nc["sources"]}
+    assert by["newsapi"]["used"] == 7 and by["newsapi"]["budget"] == 100
+    assert by["newsapi"]["pct"] == 7.0
+    assert by["currents"]["used"] == 0                 # unseen source reads zero
+
+    lb = c.get("/api/ops/llm-budget").json()
+    assert {"used_inr", "budget_inr", "pct", "exhausted"} <= set(lb)
+    assert lb["budget_inr"] > 0 and lb["exhausted"] is False
+
+
+def test_ops_news_credits_resets_on_new_day(monkeypatch):
+    from ats.core import state
+
+    # A stale counter (yesterday's day stamp) reads as zero used today.
+    monkeypatch.setattr(state, "get_kv",
+                        lambda k, d=None: {"day": "2000-01-01", "newsapi": 99} if k == "news_credits" else (d or {}))
+    c = TestClient(create_app())
+    nc = c.get("/api/ops/news-credits").json()
+    assert all(s["used"] == 0 for s in nc["sources"])
+
+
 def test_ops_page_and_nav_render():
     c = TestClient(create_app())
     assert "engine room" in c.get("/ops").text

@@ -332,11 +332,15 @@ flowchart LR
 - **Pluggable sources** ([sources.py](../ats/services/market_data/sources.py)):
   a `DataSource.poll(symbol)` protocol with `SyntheticDataSource` (deterministic
   GBM, ~6% inflated-volume bars for spike testing), `YFinanceDataSource`,
-  `NseLiveSource` (yfinance daily + cached intraday, `.NS` mapping), and a
-  `KiteDataSource` stub. `ResilientDataSource` wraps a live source with a
-  per-symbol cache and synthetic fallback, exposing `is_live()` for feed health.
+  `NseLiveSource` (yfinance daily + cached intraday, `.NS` mapping), and
+  `KiteLiveSource` (authenticated Zerodha feed: daily `historical_data` with the
+  last bar overlaid by a **batched** `quote()` LTP call ≤500 symbols/call, plus
+  minute candles — degrading to `NseLiveSource` whenever the daily token is
+  missing/expired). `ResilientDataSource` wraps a live source with a per-symbol
+  cache and synthetic fallback, exposing `is_live()` for feed health.
   `build_data_source()` honors `ATS_DATA_SOURCE` (`nse_live`/`yfinance`/`kite`,
-  default synthetic).
+  default synthetic); the `kite` path chains Kite → nse_live → synthetic so the
+  feed is never dead at 9:15.
 - **NSE calendar** ([calendar.py](../ats/services/market_data/calendar.py)):
   09:15-15:30 IST sessions, holiday sets, and `is_polling_window()` (session +
   45-min post-close grace). Live polling pauses off-hours; synthetic always
@@ -664,10 +668,11 @@ flowchart LR
   execution; `PAPER` simulates fills; `APPROVAL` requires explicit per-trade
   approval; `AUTO` proceeds on its own. The kill switch blocks every route.
 - **Real-money gate**: `real_money_active()` requires `ATS_REAL_MONEY_ENABLED`,
-  a live mode, and not-killed. The `KiteDataSource`/`kite_adapter` are present
-  but `submit()` raises `NotImplementedError` in v1 — real orders are
-  structurally impossible. The gate is **config-only**, never openable via API
-  or dashboard.
+  a live mode, and not-killed. The `kite_adapter` order path is present but
+  `submit()` raises `NotImplementedError` in v1 — real orders are structurally
+  impossible. (Read-only Kite *market data* via `KiteLiveSource` is unrelated to
+  this gate: reading candles/quotes needs only a daily token, not real-money.)
+  The gate is **config-only**, never openable via API or dashboard.
 - **Fee model** ([fees.py](../ats/services/execution/fees.py)): Zerodha-style
   delivery charges (brokerage capped at Rs 20, STT on sell, exchange txn, GST,
   SEBI, stamp on buy). The paper broker

@@ -39,6 +39,18 @@
     <div id="modelsBox"><div class="empty">Loading…</div></div>
   </div>
 
+  <div class="card span6 reveal">
+    <h2>LLM budget (month-to-date)</h2>
+    <p class="sub">Estimated spend vs the hard monthly cap (<code>ATS_LLM_MONTHLY_BUDGET_INR</code>). Autonomous research is gated when exhausted.</p>
+    <div id="llmBudgetBox"><div class="empty">Loading…</div></div>
+  </div>
+
+  <div class="card span6 reveal">
+    <h2>News API credits (today)</h2>
+    <p class="sub">Per-source calls used today vs the free-tier daily budget. Each keyed collector self-throttles under its cap; counters reset at midnight.</p>
+    <div id="newsCreditsBox"><div class="empty">Loading…</div></div>
+  </div>
+
   <div class="card span12 reveal">
     <h2>Kite (historical data)</h2>
     <p class="sub">One-click daily login for authenticated NSE history — read-only, live trading stays gated. Register this exact <b>Redirect URL</b> in your Kite app: <code id="kiteCb">http://127.0.0.1:8000/kite/callback</code></p>
@@ -166,6 +178,36 @@
       `<div class="sub muted" style="margin-top:8px">Full prompt/response log on the <a href="/llm">LLM page</a>.</div>`;
   }
 
+  // shared burn-down/usage bar: green < 75%, amber < 100%, red at/over cap
+  function bar(pct) {
+    const p = Math.max(0, Math.min(100, pct || 0));
+    const col = p >= 100 ? "var(--down, #fb7185)" : p >= 75 ? "#fbbf24" : "#34d399";
+    return `<div style="height:8px;border-radius:6px;background:var(--border);overflow:hidden;margin:6px 0">
+      <div style="height:100%;width:${p}%;background:${col};border-radius:6px;transition:width .3s"></div></div>`;
+  }
+
+  async function loadLlmBudget() {
+    const b = await get("/api/ops/llm-budget"); const el = document.getElementById("llmBudgetBox");
+    if (!b) { el.innerHTML = '<div class="empty">–</div>'; return; }
+    const pill = b.exhausted ? '<span class="pill red">exhausted</span>'
+      : b.pct >= 75 ? '<span class="pill amber">near cap</span>' : '<span class="pill green">ok</span>';
+    el.innerHTML =
+      `<div class="row-between"><b>₹${(b.used_inr || 0).toFixed(2)} <span class="muted" style="font-weight:400">/ ₹${(b.budget_inr || 0).toFixed(0)}</span></b>${pill}</div>` +
+      bar(b.pct) +
+      `<div class="sub muted">${(b.pct || 0).toFixed(1)}% of the monthly cap used</div>`;
+  }
+
+  async function loadNewsCredits() {
+    const d = await get("/api/ops/news-credits"); const el = document.getElementById("newsCreditsBox");
+    const rows = (d && d.sources) || [];
+    if (!rows.length) { el.innerHTML = '<div class="empty">–</div>'; return; }
+    el.innerHTML = rows.map((s) =>
+      `<div style="padding:6px 0;border-bottom:1px dashed var(--border)">
+        <div class="row-between"><span title="${esc(s.note)}">${esc(s.label)}</span>
+          <b>${s.used} <span class="muted" style="font-weight:400">/ ${s.budget}</span></b></div>
+        ${bar(s.pct)}</div>`).join("");
+  }
+
   async function loadAccounts() {
     const d = await get("/api/ops/accounts"); const body = document.querySelector("#acctTable tbody");
     const rows = (d && d.accounts) || [];
@@ -208,7 +250,7 @@
     </div>`;
   }
 
-  function refresh() { loadSysMap(); loadHealth(); loadResources(); loadPerf(); loadModels(); loadKite(); loadAccounts(); loadTelemetry(); }
+  function refresh() { loadSysMap(); loadHealth(); loadResources(); loadPerf(); loadModels(); loadLlmBudget(); loadNewsCredits(); loadKite(); loadAccounts(); loadTelemetry(); }
   refresh();
   setInterval(refresh, 5000);
 })();

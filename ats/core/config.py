@@ -346,6 +346,21 @@ class Settings(BaseSettings):
     watchdog_stale_after_s: int = 900
     watchdog_auto_kill: bool = True       # engage kill switch on sustained failure
     watchdog_kill_after_failures: int = 3 # consecutive unhealthy checks
+    # Component-health alerting (L6): edge-triggered notify() when any registered
+    # service transitions into DEGRADED/DOWN (and again on recovery).
+    watchdog_health_alerts: bool = True
+
+    # --- Pre-open GO/NO-GO self-check (L6) ---
+    # A daily pre-open (IST) readiness sweep — feed warm, Kite token fresh, disk
+    # OK, LLM budget OK — emailed as one GO/NO-GO so a silent failure can't waste
+    # a paper day.
+    preopen_check_enabled: bool = True
+    preopen_hour: int = 8
+    preopen_minute: int = 45
+    disk_free_min_gb: float = 2.0         # NO-GO below this free space on the DB volume
+
+    # --- Nightly backup (L6; scripts/backup.py) ---
+    backup_retention: int = 14            # keep this many dated DB snapshots
 
     # --- Telegram approvals ---
     telegram_poll_interval_s: int = 5

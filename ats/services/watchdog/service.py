@@ -41,6 +41,25 @@ class WatchdogVerdict:
     should_kill: bool
 
 
+_BAD_HEALTH = {"DEGRADED", "DOWN"}
+
+
+def diff_health(prev: dict[str, str], cur: dict[str, str]) -> tuple[list[str], list[str]]:
+    """``(newly_bad, recovered)`` service names between two health snapshots.
+
+    Edge-triggered so alerts fire once per transition, not every check: a
+    service is *newly bad* when it enters DEGRADED/DOWN from anything else, and
+    *recovered* when it leaves. Pure — the service wraps I/O around it."""
+    newly_bad, recovered = [], []
+    for name, cur_state in cur.items():
+        was = prev.get(name)
+        if cur_state in _BAD_HEALTH and was not in _BAD_HEALTH:
+            newly_bad.append(name)
+        elif was in _BAD_HEALTH and cur_state not in _BAD_HEALTH:
+            recovered.append(name)
+    return sorted(newly_bad), sorted(recovered)
+
+
 class WatchdogMonitor:
     """Pure heartbeat state machine (no I/O)."""
 
@@ -91,9 +110,12 @@ class WatchdogService:
         )
         self._bus: EventBus | None = None
         self._was_healthy = True
+        self._orch = None
+        self._svc_health: dict[str, str] = {}
 
     async def start(self, ctx) -> None:
         self._bus = ctx.bus
+        self._orch = ctx.orchestrator
         self.monitor.start(time.monotonic())
         ctx.bus.subscribe(Topic.BAR, self._on_bar)
         ctx.scheduler.add_job(
@@ -104,6 +126,15 @@ class WatchdogService:
             max_instances=1,
             coalesce=True,
         )
+        if get_settings().watchdog_health_alerts:
+            ctx.scheduler.add_job(
+                self.check_component_health,
+                "interval",
+                seconds=max(30, get_settings().watchdog_interval_s),
+                id="watchdog_health",
+                max_instances=1,
+                coalesce=True,
+            )
 
     async def _on_bar(self, evt) -> None:
         self.monitor.record_beat(time.monotonic())
@@ -141,6 +172,32 @@ class WatchdogService:
             state.engage_kill_switch(actor="watchdog", reason=verdict.reason)
             notify(f"WATCHDOG: kill switch ENGAGED — {verdict.reason}")
         return verdict
+
+    @instrument("watchdog", "check_component_health")
+    async def check_component_health(self) -> dict:
+        """Edge-triggered alert when any registered service goes DEGRADED/DOWN
+        (and again on recovery), so a silently-failing component pages the
+        operator instead of just colouring a tile red on the Ops Console."""
+        from ats.core import telemetry
+
+        names = sorted(getattr(self._orch, "registry", {}).keys()) if self._orch else []
+        cur = telemetry.health_registry(names)
+        newly_bad, recovered = diff_health(self._svc_health, cur)
+        for svc in newly_bad:
+            st = cur.get(svc, "?")
+            log.warning("component_unhealthy", extra={"service": svc, "state": st})
+            notify(f"HEALTH: {svc} is {st}")
+            if self._bus is not None:
+                await self._bus.publish(
+                    Topic.ALERT,
+                    {"kind": "health", "service": svc, "state": st,
+                     "reason": f"{svc} → {st}"},
+                )
+        for svc in recovered:
+            log.info("component_recovered", extra={"service": svc, "state": cur.get(svc)})
+            notify(f"HEALTH: {svc} recovered ({cur.get(svc)})")
+        self._svc_health = cur
+        return {"newly_bad": newly_bad, "recovered": recovered}
 
     # --- introspection -------------------------------------------------------
     def status(self) -> dict:
