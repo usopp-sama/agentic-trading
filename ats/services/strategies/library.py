@@ -255,6 +255,7 @@ class PairsZScore(UniverseStrategy):
 
     id = "pairs_zscore"
     style = "stat_arb"
+    long_short = True   # backtest with the short leg intact, not long-only (E1)
 
     def __init__(
         self,

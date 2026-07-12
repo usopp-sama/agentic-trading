@@ -15,6 +15,7 @@ from ats.core.db import session_scope
 from ats.core.events import EventBus, Topic
 from ats.core.logging import get_logger
 from ats.core.models import NewsItem, SentimentScore
+from ats.core.telemetry import instrument
 from ats.services.nlp.sentiment import build_sentiment_model
 from ats.services.nlp.vectorstore import get_vector_store
 

@@ -169,15 +169,48 @@ like "evaluated, failed."
 
 ## Sequencing
 
-| Order | Item | Effort | Why this order |
-|---|---|---|---|
-| 1 | E1 long-short replay fix | 0.5 d | Cheapest, most likely single high-value insight (pairs/coint are probably being underrated right now) |
-| 2 | E7 data-gap labeling | 0.5 d | Cheap correctness fix, unblocks honest reporting |
-| 3 | E2 walk-forward wiring | 1.5 d | Foundational — E4 and E5's trend filter both benefit from genuine OOS evaluation |
-| 4 | E4 two-stage gate | 1 d | Needs E2's OOS data to be statistically honest |
-| 5 | E3 universe broadening | 1 d | Independent; re-run after E1-E4 land so the comparison is against the improved harness |
-| 6 | E5 core_allocation + st_reversal tuning | 1.5 d | Targeted improvement on the two closest strategies |
-| 7 | E6 ensemble evaluation | 1 d | Exploratory finish — try combining what E1-E5 produced |
+| Order | Item | Effort | Why this order | Status |
+|---|---|---|---|---|
+| 1 | E1 long-short replay fix | 0.5 d | Cheapest, most likely single high-value insight (pairs/coint are probably being underrated right now) | ✅ done |
+| 2 | E7 data-gap labeling | 0.5 d | Cheap correctness fix, unblocks honest reporting | ✅ done |
+| 3 | E2 walk-forward wiring | 1.5 d | Foundational — E4 and E5's trend filter both benefit from genuine OOS evaluation | ◑ partial (time-based OOS done; param-grid plateau deferred) |
+| 4 | E4 two-stage gate | 1 d | Needs E2's OOS data to be statistically honest | ⏳ |
+| 5 | E3 universe broadening | 1 d | Independent; re-run after E1-E4 land so the comparison is against the improved harness | ⏳ |
+| 6 | E5 core_allocation + st_reversal tuning | 1.5 d | Targeted improvement on the two closest strategies | ⏳ |
+| 7 | E6 ensemble evaluation | 1 d | Exploratory finish — try combining what E1-E5 produced | ⏳ |
+
+### Build log (this session)
+
+- **E1 done.** `_stance_position(stance, long_short=True)` maps `SELL→-1`;
+  `replay_per_symbol`/`replay_universe` take a `long_short` flag;
+  `portfolio_returns` now averages over `|pos|>0` (keeps short legs).
+  `pairs_zscore` + `coint_pairs` declare `long_short = True` and are routed
+  through it — they now show a `[L/S]` tag in the report and trade their short
+  leg. Unit-tested (`tests/test_strategy_edge.py`).
+- **E7 done.** `evaluate_strategy` distinguishes a *data gap* (no return series /
+  never traded) from a real hold; the report shows `skip (data gap)` for
+  `news_sentiment`/`nav_premium`/etc. instead of a misleading 0.
+- **Observability (operator ask).** The gate now streams a plain-English line
+  per strategy to the terminal AND `var/metrics/backtest_run_<date>.log`
+  ("traded 30 stocks over 44 trades, made Rs 4,276 on Rs 1,00,000 — did NOT
+  pass"), and `report.summary()` opens with a PLAIN ENGLISH headline (how many
+  made money, the best, how many cleared the gate) above the detail table with
+  trades / stocks / Rs P&L / win% columns.
+- **E2 partial.** `run_gate(walk_forward=True)` (CLI `--walk-forward`) now
+  reports a **time-based out-of-sample Sharpe** per strategy: hold out the first
+  `wf_train=252` bars as burn-in, score only the stitched later `wf_test=63`
+  windows (`walk_forward_oos` → `oos_sharpe`), and flag `[decay]` when the full
+  Sharpe was positive but the held-out Sharpe fell below half of it. A new
+  `oos_sh` column + headline line surface it. Unit-tested.
+  - **Deferred (the other half of E2):** the *parameter-grid* `plateau_ratio`
+    check needs each strategy to expose a `signal_fn(prices, **params)` +
+    param grid so `quant.backtest.validation.walk_forward()` can refit per
+    window. The stance-based strategies don't expose that yet; wiring it is a
+    per-strategy effort (own workstream). The time-based OOS above is the
+    honest, no-refit approximation that works on every strategy today.
+
+**Still open (larger, multi-day):** E2 param-grid plateau, E4 two-stage gate,
+E3 midcap universe, E5 core_allocation/st_reversal tuning, E6 ensemble.
 
 Total ≈ 7 working days. Re-run `python scripts/run_backtests.py --kite
 --period 3y` after each workstream to track DSR movement — that number, not

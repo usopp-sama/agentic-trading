@@ -86,14 +86,258 @@ class YFinanceDataSource:
         return fetch_prices(symbol, period=self._period)
 
 
-class KiteDataSource:
-    """Zerodha Kite source. Deferred until real-money is enabled."""
+# --- Zerodha Kite live source (L2) ------------------------------------------
+# Our internal intervals -> Kite historical interval names.
+_KITE_INTERVAL = {"1m": "minute", "3m": "3minute", "5m": "5minute",
+                  "15m": "15minute", "30m": "30minute", "60m": "60minute",
+                  "1h": "60minute", "1d": "day", "1w": "day"}
+# How far back to request each intraday interval (bounds the payload and stays
+# under Kite's per-interval history caps).
+_KITE_LOOKBACK_DAYS = {"minute": 5, "3minute": 10, "5minute": 15, "15minute": 30,
+                       "30minute": 45, "60minute": 90, "day": 400}
+_KITE_QUOTE_CHUNK = 500  # kite.quote() accepts up to 500 instruments per call
 
-    def poll(self, symbol: str) -> pd.DataFrame:  # pragma: no cover
-        raise NotImplementedError(
-            "Kite data source is not enabled in v1. Set ATS_DATA_SOURCE=synthetic "
-            "or yfinance. Kite is wired in when the real-money gate opens."
-        )
+
+def _kite_quote_key(symbol: str) -> str | None:
+    """Internal symbol -> Kite quote key (``RELIANCE.NS`` -> ``NSE:RELIANCE``);
+    indices (``^NSEI``) return None (Kite exposes them under a different namespace)."""
+    from ats.services.market_data.kite_history import nse_symbol
+
+    ns = nse_symbol(symbol)
+    return f"NSE:{ns}" if ns else None
+
+
+def _chunks(seq: list, size: int):
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
+
+def _ltps_from_quote(resp: dict) -> dict[str, float]:
+    """Kite ``quote()`` payload ``{'NSE:SYM': {'last_price': x, ...}}`` -> ``{'NSE:SYM': x}``."""
+    out: dict[str, float] = {}
+    for key, val in (resp or {}).items():
+        try:
+            lp = val.get("last_price") if isinstance(val, dict) else None
+            if lp is not None:
+                out[key] = float(lp)
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+def _candles_from_records(records: list[dict]) -> list[dict]:
+    """Kite ``historical_data`` records -> chart candles (epoch-keyed)."""
+    out: list[dict] = []
+    for r in records or []:
+        try:
+            t = pd.Timestamp(r["date"])
+            epoch = int((t.tz_localize("UTC") if t.tzinfo is None else t).timestamp())
+            out.append({"time": epoch, "open": float(r["open"]), "high": float(r["high"]),
+                        "low": float(r["low"]), "close": float(r["close"]),
+                        "volume": float(r.get("volume", 0.0) or 0.0)})
+        except Exception:  # noqa: BLE001 - skip a malformed record, keep the rest
+            continue
+    return out
+
+
+def _overlay_ltp(df: pd.DataFrame, ltp: float) -> pd.DataFrame:
+    """Return ``df`` with its last (forming) bar's close set to the live LTP and
+    high/low widened to include it — so a cheap batched quote keeps the daily
+    frame ticking without re-downloading history every poll. Pure."""
+    if df is None or df.empty or ltp is None:
+        return df
+    out = df.copy()
+    for col in ("close", "high", "low"):  # tolerate int frames (real feeds are float)
+        if col in out and out[col].dtype.kind != "f":
+            out[col] = out[col].astype(float)
+    i = out.index[-1]
+    out.at[i, "close"] = float(ltp)
+    out.at[i, "high"] = max(float(out.at[i, "high"]), float(ltp))
+    out.at[i, "low"] = min(float(out.at[i, "low"]), float(ltp))
+    return out
+
+
+class KiteLiveSource:
+    """Authenticated Zerodha Kite live feed with a free-data safety net.
+
+    - ``poll(symbol)`` returns daily OHLCV (Kite ``historical_data``), the history
+      cached with a long TTL and its last bar overlaid with the live LTP so each
+      poll reflects intraday movement *without* re-downloading history.
+    - ``quote(symbol)`` returns LTP from a **batched** cache: one ``kite.quote()``
+      call (chunked to ≤500 symbols) refreshes the whole known watchlist per
+      window, honouring Kite's 3 req/s quote budget.
+    - ``intraday(...)`` returns recent minute candles for the Charts page.
+
+    Every path degrades to the injected ``fallback`` (nse_live) when the daily
+    token is missing/expired or a Kite call fails — so there's never a dead feed
+    at 9:15 just because you hadn't clicked Login yet. Network calls are best-
+    effort; the pure shaping helpers above are unit-tested.
+    """
+
+    def __init__(self, fallback: DataSource | None = None, *, years: int = 2,
+                 daily_refresh_s: int = 4 * 3600, quote_refresh_s: int = 55,
+                 intraday_refresh_s: int = 60, kite_factory=None) -> None:
+        self._fallback = fallback if fallback is not None else NseLiveSource()
+        self._years = years
+        self._daily_refresh_s = daily_refresh_s
+        self._quote_refresh_s = quote_refresh_s
+        self._intraday_refresh_s = intraday_refresh_s
+        self._kite_factory = kite_factory  # test seam; defaults to build_kite
+        self._kite = None
+        self._kite_warned = False
+        self._tokens: dict[str, int] = {}
+        self._universe: set[str] = set()
+        self._daily_cache: dict[str, tuple[float, pd.DataFrame]] = {}
+        self._intraday_cache: dict[tuple[str, str], tuple[float, list[dict]]] = {}
+        self._ltp: dict[str, float] = {}
+        self._ltp_ts: float = 0.0
+
+    # --- kite handle -------------------------------------------------------
+    def _kite_or_none(self):  # pragma: no cover - needs creds + kiteconnect dep
+        if self._kite is not None:
+            return self._kite
+        factory = self._kite_factory
+        if factory is None:
+            from ats.services.market_data.kite_history import build_kite
+            factory = build_kite
+        try:
+            self._kite = factory()  # raises KiteNotReady if token/dep missing
+            return self._kite
+        except Exception as exc:  # noqa: BLE001 - degrade to the free feed
+            if not self._kite_warned:
+                log.warning("kite_unavailable_using_fallback", extra={"error": str(exc)})
+                self._kite_warned = True
+            return None
+
+    def kite_ready(self) -> bool:
+        return self._kite_or_none() is not None
+
+    def _tokens_map(self) -> dict[str, int]:  # pragma: no cover - network
+        kite = self._kite_or_none()
+        if kite is None:
+            return {}
+        if not self._tokens:
+            try:
+                from ats.services.market_data.kite_history import _instrument_tokens
+                self._tokens = _instrument_tokens(kite)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("kite_tokens_failed", extra={"error": str(exc)})
+                self._tokens = {}
+        return self._tokens
+
+    # --- daily poll --------------------------------------------------------
+    def poll(self, symbol: str) -> pd.DataFrame:  # pragma: no cover - network
+        self._universe.add(symbol)
+        kite = self._kite_or_none()
+        if kite is None:
+            return self._fallback.poll(symbol)
+        df = self._daily_frame(symbol, kite)
+        if df is None or df.empty:
+            return self._fallback.poll(symbol)
+        ltp = self._live_ltp(symbol, kite)
+        return _overlay_ltp(df, ltp) if ltp is not None else df
+
+    def _daily_frame(self, symbol: str, kite) -> pd.DataFrame | None:  # pragma: no cover
+        from datetime import date, timedelta
+
+        from ats.services.market_data.kite_history import _records_to_df, nse_symbol
+
+        now = time.time()
+        cached = self._daily_cache.get(symbol)
+        if cached and (now - cached[0]) < self._daily_refresh_s:
+            return cached[1]
+        ns = nse_symbol(symbol)
+        tok = self._tokens_map().get(ns) if ns else None
+        if not tok:
+            return None
+        end = date.today()
+        start = end - timedelta(days=int(365.25 * self._years))
+        try:
+            df = _records_to_df(kite.historical_data(tok, start, end, "day"))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("kite_poll_failed", extra={"symbol": symbol, "error": str(exc)})
+            return cached[1] if cached else None
+        if df is not None and not df.empty:
+            self._daily_cache[symbol] = (now, df)
+        return df
+
+    # --- batched live quotes ----------------------------------------------
+    def quote(self, symbol: str) -> float | None:  # pragma: no cover - network
+        self._universe.add(symbol)
+        kite = self._kite_or_none()
+        if kite is None:
+            fn = getattr(self._fallback, "quote", None)
+            return fn(symbol) if fn else None
+        ltp = self._live_ltp(symbol, kite)
+        if ltp is not None:
+            return ltp
+        fn = getattr(self._fallback, "quote", None)
+        return fn(symbol) if fn else None
+
+    def _live_ltp(self, symbol: str, kite) -> float | None:  # pragma: no cover
+        now = time.time()
+        if (now - self._ltp_ts) >= self._quote_refresh_s or symbol not in self._ltp:
+            self._refresh_quotes(kite)
+        return self._ltp.get(symbol)
+
+    def _refresh_quotes(self, kite) -> None:  # pragma: no cover
+        keymap = {k: s for s in self._universe if (k := _kite_quote_key(s))}
+        keys = list(keymap)
+        if not keys:
+            return
+        fresh: dict[str, float] = {}
+        ok = False
+        for chunk in _chunks(keys, _KITE_QUOTE_CHUNK):
+            try:
+                resp = kite.quote(chunk)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("kite_quote_failed", extra={"error": str(exc), "n": len(chunk)})
+                continue
+            ok = True
+            for qk, lp in _ltps_from_quote(resp).items():
+                if (sym := keymap.get(qk)) is not None:
+                    fresh[sym] = lp
+        if ok:
+            self._ltp.update(fresh)
+            self._ltp_ts = time.time()
+
+    # --- intraday candles --------------------------------------------------
+    def intraday(self, symbol: str, interval: str = "5m", limit: int = 300) -> list[dict]:  # pragma: no cover
+        kite = self._kite_or_none()
+        if kite is None:
+            return self._fallback_intraday(symbol, interval, limit)
+        iv = _KITE_INTERVAL.get(interval, "5minute")
+        key = (symbol, iv)
+        now = time.time()
+        cached = self._intraday_cache.get(key)
+        if cached and (now - cached[0]) < self._intraday_refresh_s:
+            return cached[1][-limit:]
+        candles = self._intraday_kite(symbol, iv, kite)
+        if candles is None:
+            return self._fallback_intraday(symbol, interval, limit)
+        self._intraday_cache[key] = (now, candles)
+        return candles[-limit:]
+
+    def _intraday_kite(self, symbol: str, iv: str, kite) -> list[dict] | None:  # pragma: no cover
+        from datetime import date, timedelta
+
+        from ats.services.market_data.kite_history import nse_symbol
+
+        ns = nse_symbol(symbol)
+        tok = self._tokens_map().get(ns) if ns else None
+        if not tok:
+            return None
+        end = date.today()
+        start = end - timedelta(days=_KITE_LOOKBACK_DAYS.get(iv, 15))
+        try:
+            return _candles_from_records(kite.historical_data(tok, start, end, iv))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("kite_intraday_failed", extra={"symbol": symbol, "error": str(exc)})
+            return None
+
+    def _fallback_intraday(self, symbol: str, interval: str, limit: int) -> list[dict]:  # pragma: no cover
+        fn = getattr(self._fallback, "intraday", None)
+        return fn(symbol, interval=interval, limit=limit) if fn else []
 
 
 # yfinance interval/period mapping for intraday (free, no API key, covers NSE
@@ -255,5 +499,15 @@ def build_data_source() -> DataSource:
         refresh = max(120, settings.market_scan_interval_s)
         return ResilientDataSource(YFinanceDataSource(), SyntheticDataSource(), refresh_s=refresh)
     if source == "kite":
-        return KiteDataSource()
+        # Kite live → nse_live (yfinance) → synthetic: never a dead feed. The
+        # inner ResilientDataSource caches per-symbol frames and tracks is_live
+        # (True unless a symbol fell all the way through to synthetic); the Kite
+        # source itself falls back to nse_live when the daily token is missing.
+        refresh = max(60, settings.market_scan_interval_s)
+        kite_live = KiteLiveSource(
+            fallback=NseLiveSource(),
+            quote_refresh_s=max(30, settings.intraday_refresh_s),
+            intraday_refresh_s=max(30, settings.intraday_refresh_s),
+        )
+        return ResilientDataSource(kite_live, SyntheticDataSource(), refresh_s=refresh)
     return SyntheticDataSource()

@@ -33,22 +33,36 @@ from sqlalchemy import delete, select
 from ats.core.config import get_settings
 from ats.core.db import session_scope
 from ats.core.models import (
+    AnalyticsSnapshot,
     Approval,
     Attribution,
     Decision,
+    DematHolding,
     Fill,
     KvState,
+    LedgerEntry,
     Order,
     PnlDaily,
     Position,
+    PositionThesis,
     Signal,
     SleevePnl,
     SmeOpinion,
+    ThesisRevision,
 )
 
-# Account-scoped + reasoning tables cleared on reset (newest-first by FK depth).
-_CLEAR = [Fill, Attribution, Approval, Order, Position, PnlDaily,
-          Decision, Signal, SmeOpinion, SleevePnl]
+# Every table that records a trade, a holding, the reasoning behind it, or a
+# derived P&L mark — cleared on reset (newest-first by FK depth). Reference and
+# learning data (instruments, ohlcv, news, sentiment, fundamentals, strategies,
+# rules, SME track records, knowledge) is deliberately left untouched.
+_CLEAR = [
+    Fill, Attribution, Approval, Order, Position, PnlDaily,
+    Decision, Signal, SmeOpinion, SleevePnl,
+    LedgerEntry,        # the cash passbook (journal)
+    DematHolding,       # settled + pending share holdings
+    PositionThesis, ThesisRevision,   # the written reasoning per open position
+    AnalyticsSnapshot,  # derived equity/P&L history shown on the dashboard
+]
 
 
 def _backup_sqlite() -> str | None:
@@ -67,30 +81,49 @@ def _backup_sqlite() -> str | None:
     return str(dest)
 
 
+def _accounts(s) -> list[str]:
+    """Every account that has ever had a ledger, plus the main paper account.
+
+    Accounts are discovered from the ``ledger:<account>`` kv keys (main paper +
+    any league solos / per-user books), so the reset wipes the *whole* book, not
+    just the main account."""
+    rows = s.execute(select(KvState.key)).scalars().all()
+    found = {k.split(":", 1)[1] for k in rows if k.startswith("ledger:")}
+    found.add("paper")
+    return sorted(found)
+
+
 def reset() -> dict:
     settings = get_settings()
     if settings.real_money_enabled:
         raise SystemExit("Refusing to reset: ATS_REAL_MONEY_ENABLED is true.")
 
-    account = "paper"
     capital = settings.paper_starting_capital
     counts: dict[str, int] = {}
     with session_scope() as s:
+        accounts = _accounts(s)
         for model in _CLEAR:
-            n = s.execute(select(model)).scalars().all()
-            counts[model.__tablename__] = len(n)
+            existing = s.execute(select(model)).scalars().all()
+            counts[model.__tablename__] = len(existing)
             s.execute(delete(model))
-        # Reset cash to starting capital; clear the drawdown high-water mark.
-        cash_key = f"cash:{account}"
-        row = s.get(KvState, cash_key)
-        if row is None:
-            s.add(KvState(key=cash_key, value={"cash": capital}))
-        else:
-            row.value = {"cash": capital}
-        peak = s.get(KvState, f"risk:peak_equity:{account}")
-        if peak is not None:
-            s.delete(peak)
-    return {"cleared": counts, "cash_reset_to": capital}
+
+        # Reset every account's live ledger (cash + holds) and the legacy cash
+        # mirror to starting capital, and clear its drawdown high-water mark.
+        for account in accounts:
+            _set_kv(s, f"ledger:{account}", {"cash": capital, "holds": {}})
+            _set_kv(s, f"cash:{account}", {"cash": capital})
+            peak = s.get(KvState, f"risk:peak_equity:{account}")
+            if peak is not None:
+                s.delete(peak)
+    return {"cleared": counts, "cash_reset_to": capital, "accounts": accounts}
+
+
+def _set_kv(s, key: str, value: dict) -> None:
+    row = s.get(KvState, key)
+    if row is None:
+        s.add(KvState(key=key, value=value))
+    else:
+        row.value = value
 
 
 def main() -> None:
@@ -110,8 +143,9 @@ def main() -> None:
     result = reset()
     print("Cleared rows:")
     for table, n in result["cleared"].items():
-        print(f"  {table:<16} {n}")
-    print(f"Cash reset to: Rs{result['cash_reset_to']:,.0f}")
+        print(f"  {table:<18} {n}")
+    print(f"Accounts reset ({len(result['accounts'])}): {', '.join(result['accounts'])}")
+    print(f"Cash reset to: Rs{result['cash_reset_to']:,.0f} each")
     print("Done. Restart the server to begin a clean paper run.")
 
 

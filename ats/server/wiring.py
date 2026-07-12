@@ -39,6 +39,7 @@ _SERVICES = [
     ("ats.services.email.service", "EmailService"),
     ("ats.services.telegram.service", "TelegramService"),
     ("ats.services.watchdog.service", "WatchdogService"),
+    ("ats.services.watchdog.preopen", "PreOpenCheckService"),
     ("ats.services.learning.service", "LearningService"),
     ("ats.services.metrics.service", "MetricsService"),
     ("ats.services.rules.service", "RulesService"),

@@ -23,6 +23,10 @@ with no API keys, no database server, and no internet strictly required.
 > [Safety model](#safety-model) and [Path to real money](#path-to-real-money) before
 > even thinking about live capital.
 
+> 📚 **New here?** Start with **[docs/00_READING_GUIDE.md](docs/00_READING_GUIDE.md)**
+> (a numbered path through every doc) and **[docs/01_SOURCE_GUIDE.md](docs/01_SOURCE_GUIDE.md)**
+> (a plain-language tour of the code).
+
 ---
 
 ## Table of contents
@@ -447,11 +451,26 @@ journalctl -u ats -f
 The unit auto-restarts on crash (with crash-loop protection), runs least-privilege
 (`NoNewPrivileges`, `ProtectSystem=strict`, read-write only on `var/`), and caps memory.
 
-Encrypted, timestamped backups of the SQLite DB + state:
+Encrypted, timestamped backups of the SQLite DB + state (Linux/macOS, cron):
 
 ```bash
 scripts/backup.sh
 ```
+
+On **Windows** (the laptop host), use the pure-Python equivalent — a
+WAL-consistent snapshot via SQLite's online-backup API, pruned to
+`ATS_BACKUP_RETENTION` (default 14) under `var/backups/`:
+
+```powershell
+.venv\Scripts\python.exe scripts\backup.py
+# schedule nightly at 21:00 via Task Scheduler:
+schtasks /Create /TN "ATS nightly backup" /SC DAILY /ST 21:00 `
+  /TR "`"%CD%\.venv\Scripts\python.exe`" `"%CD%\scripts\backup.py`""
+```
+
+A daily **pre-open GO/NO-GO self-check** (08:45 IST) emails one readiness
+summary — feed warm, Kite token fresh, disk OK, LLM budget OK — and the
+watchdog now **alerts on any service going DEGRADED/DOWN** (and on recovery).
 
 ---
 

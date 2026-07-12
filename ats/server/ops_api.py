@@ -55,6 +55,67 @@ def ops_resources() -> dict:
     return resource_sample()
 
 
+# Per-source free-tier daily budgets — the denominator for the credits gauge.
+# Marketaux is intentionally absent: it doesn't bump the kv counter (it self-
+# throttles independently and has a tiny 3-article payload).
+_NEWS_BUDGETS: dict[str, dict] = {
+    "newsapi": {"label": "newsapi.org", "budget": 100, "note": "business/top-headlines IN"},
+    "newsdata": {"label": "newsdata.io", "budget": 200, "note": "12 h delayed"},
+    "currents": {"label": "currentsapi.services", "budget": 1000, "note": "business IN"},
+}
+
+
+@router.get("/news-credits")
+def ops_news_credits() -> dict:
+    """Per-source news-API credits used today vs the free-tier daily budget.
+
+    Reads the ``news_credits`` kv counter the keyed collectors bump on every
+    successful call (see ``ats.services.scraper.collectors``). Resets implicitly
+    at midnight: a counter whose ``day`` isn't today reads as zero used."""
+    from datetime import date
+
+    from ats.core import state
+
+    cur = state.get_kv("news_credits") or {}
+    today = date.today().isoformat()
+    fresh = cur.get("day") == today
+    sources = []
+    for name, meta in _NEWS_BUDGETS.items():
+        used = int(cur.get(name, 0)) if fresh else 0
+        budget = int(meta["budget"])
+        sources.append({
+            "source": name,
+            "label": meta["label"],
+            "used": used,
+            "budget": budget,
+            "pct": round(100.0 * used / budget, 1) if budget else 0.0,
+            "note": meta["note"],
+        })
+    return {"day": today, "counting_day": cur.get("day", ""), "sources": sources}
+
+
+@router.get("/llm-budget")
+def ops_llm_budget() -> dict:
+    """Month-to-date LLM spend vs the hard monthly cap (``ATS_LLM_MONTHLY_BUDGET_INR``).
+
+    Standalone (doesn't require the research service to be registered): it
+    re-derives the same figure ``ResearchFactory.budget_status`` uses — the
+    est-INR rollup over a window reaching back to (roughly) the 1st."""
+    from datetime import date
+
+    from ats.core.config import get_settings
+    from ats.services.agents.llm_log import usage_summary
+
+    used = float(usage_summary(days=max(1, date.today().day)).get("est_inr", 0.0))
+    budget = float(get_settings().llm_monthly_budget_inr)
+    return {
+        "used_inr": round(used, 2),
+        "budget_inr": budget,
+        "pct": round(100.0 * used / budget, 1) if budget else 0.0,
+        "exhausted": bool(budget > 0 and used >= budget),
+    }
+
+
 @router.get("/accounts")
 def ops_accounts(request: Request) -> dict:
     """Every trading profile (main + league solos) with bank cash + demat
