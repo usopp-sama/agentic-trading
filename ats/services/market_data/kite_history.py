@@ -112,14 +112,36 @@ def _records_to_df(records: list[dict]) -> pd.DataFrame:
 
 
 def _instrument_tokens(kite) -> dict[str, int]:  # pragma: no cover - network
-    """Map NSE trading symbol -> instrument_token (one call, cached per process)."""
+    """Map NSE trading symbol -> instrument_token (one call, cached per process).
+
+    ``kite.instruments("NSE")`` downloads the full exchange instrument dump
+    (a large CSV) — flaky wifi or a TLS-inspecting proxy can reset it
+    mid-transfer, so retry a few times with backoff before giving up.
+    """
     global _TOKENS
     try:
         return _TOKENS  # type: ignore[name-defined]
     except NameError:
         pass
+    import time as _time
+
+    last_exc: Exception | None = None
+    rows = None
+    for attempt in range(4):
+        try:
+            rows = kite.instruments("NSE")
+            break
+        except Exception as exc:  # noqa: BLE001 — retry transient network resets
+            last_exc = exc
+            log.warning("kite_instruments_retry",
+                        extra={"attempt": attempt + 1, "error": str(exc)})
+            _time.sleep(2.0 * (attempt + 1))
+    if rows is None:
+        raise KiteNotReady(
+            f"kite.instruments('NSE') failed after 4 attempts: {last_exc}"
+        )
     tokens: dict[str, int] = {}
-    for row in kite.instruments("NSE"):
+    for row in rows:
         if row.get("segment") == "NSE" and row.get("instrument_type") == "EQ":
             tokens[row["tradingsymbol"]] = row["instrument_token"]
     globals()["_TOKENS"] = tokens

@@ -37,17 +37,15 @@ live trading (that stays behind the real-money gate, untouched).
 
 ## 2. Daily: get an access token
 
-Kite access tokens expire every morning (~6 AM IST), so this is a once-a-day
-step. Two ways:
+Kite access tokens expire every morning (~6 AM IST) — that's Zerodha's rule,
+not something this app controls — so this is a once-a-day step. Two ways:
 
 **A) One click from the dashboard (recommended).** With the server running,
 open the **Ops Console** (`/ops`) → the **Kite** card → **Login with Zerodha**.
 Log in; Zerodha redirects to `/kite/callback`, the dashboard exchanges the
 `request_token`, and stores the access token at runtime (in the DB) — so it
 works immediately *and* the backtest process picks it up. The card flips to
-`token active`. Nothing to copy-paste. (The success page also shows the
-`ATS_KITE_ACCESS_TOKEN=…` line if you'd like to add it to `.env` so it survives
-a restart.)
+`token active`. Nothing to copy-paste.
 
 **B) Command line.** If you're not running the server:
 
@@ -55,8 +53,18 @@ a restart.)
 .venv/Scripts/python -m scripts.kite_login
 ```
 
-It prints a login URL → log in → paste the `request_token` from the redirect
-URL back into the prompt; it prints `ATS_KITE_ACCESS_TOKEN=…` to add to `.env`.
+It prints a login URL → log in → paste the `request_token` (or the whole
+redirect URL) back into the prompt; it exchanges it and stores the token in
+the same DB kv store as option A.
+
+> ⚠️ **Token precedence — read this once.** `ATS_KITE_ACCESS_TOKEN` in `.env`
+> is only a fallback used when the DB kv store is empty. **Once you've ever
+> logged in via A or B, the DB-stored token wins every time** — editing
+> `.env` after that point has no effect until the DB entry is refreshed by
+> logging in again. In practice this means: **always refresh via A or B, not
+> by hand-editing `.env`.** A stale DB token is exactly what
+> `Incorrect \`api_key\` or \`access_token\`.` on every symbol means — log in
+> again and re-run.
 
 ## 3. Backtest every strategy on Kite history
 
