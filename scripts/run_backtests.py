@@ -143,6 +143,8 @@ def main() -> None:
     ap.add_argument("--min-obs", type=int, default=30, help="min active observations")
     ap.add_argument("--step", type=int, default=1, help="per-symbol replay stride")
     ap.add_argument("--universe-step", type=int, default=5, help="universe replay stride")
+    ap.add_argument("--walk-forward", action="store_true",
+                    help="also report held-out out-of-sample Sharpe (E2) to flag decayed edges")
     ap.add_argument("--apply", action="store_true", help="promote cleared shadows to paper")
     args = ap.parse_args()
 
@@ -184,7 +186,7 @@ def main() -> None:
         universe_strategies=universe_strategies,
         dsr_threshold=dsr, min_obs=args.min_obs, fee_bps=5.0,
         step=args.step, universe_step=args.universe_step,
-        progress=on_progress,
+        progress=on_progress, walk_forward=args.walk_forward,
     )
     summary = report.summary()
     print("\n" + summary)

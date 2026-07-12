@@ -53,11 +53,12 @@ Two brand-new companion docs live next to this one:
 
 ## Track D — Where the project has been (history / context)
 
-12. **[handoff_2026-06-30.md](handoff_2026-06-30.md)** — a snapshot handoff of
+12. **[handoff_2026-07-12.md](handoff_2026-07-12.md)** — latest system state handoff (essential reading to get context of the recent features and architecture).
+13. **[handoff_2026-06-30.md](handoff_2026-06-30.md)** — a snapshot handoff of
     the system state (older, but good narrative context).
-13. **[assessment_and_plan_2026-07-07.md](assessment_and_plan_2026-07-07.md)** —
+14. **[assessment_and_plan_2026-07-07.md](assessment_and_plan_2026-07-07.md)** —
     an honest independent review against the stated goal (₹10k/month on ₹1L).
-14. **[dashboard_redesign.md](dashboard_redesign.md)** — the "results-first"
+15. **[dashboard_redesign.md](dashboard_redesign.md)** — the "results-first"
     dashboard design thinking.
 
 ## Track E — Detailed build plans (`docs/plans/`, deepest, read last)

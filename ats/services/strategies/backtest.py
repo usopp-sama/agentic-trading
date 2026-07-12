@@ -75,6 +75,17 @@ class GateResult:
     win_rate: float = 0.0      # share of active days that were positive
     long_short: bool = False   # scored with shorts (True) or long-only (False)
     data_gap: bool = False     # n=0 because there was no data, not a real result
+    # --- walk-forward (E2): Sharpe on the held-out later part of the history ---
+    oos_sharpe: float | None = None   # None unless walk-forward evaluation ran
+    oos_windows: int = 0
+
+    def oos_decayed(self) -> bool:
+        """True when the edge weakened materially out-of-sample: full Sharpe was
+        positive but the later, held-out Sharpe fell below half of it (or went
+        negative). A flag to distrust the DSR even if it clears the bar."""
+        if self.oos_sharpe is None or self.sharpe <= 0:
+            return False
+        return self.oos_sharpe < max(0.0, 0.5 * self.sharpe)
 
     def plain_english(self) -> str:
         """One sentence a finance-illiterate reader can follow."""
@@ -106,11 +117,13 @@ class GateReport:
         made = [r for r in scored if r.profit_inr > 0]
         passed = [r for r in scored if r.passes]
         best = max(scored, key=lambda x: x.profit_inr, default=None)
+        wf = any(r.oos_sharpe is not None for r in scored)   # walk-forward ran?
+        decayed = [r for r in scored if r.oos_decayed()]
 
         head = [
-            "=" * 78,
+            "=" * 88,
             "PLAIN ENGLISH",
-            "-" * 78,
+            "-" * 88,
             f"Tested {len(scored)} strategies on {format_inr(NOTIONAL_INR)} of pretend money each.",
             f"  {len(made)} made money, {len(scored) - len(made)} lost money.",
         ]
@@ -118,25 +131,35 @@ class GateReport:
             head.append(f"  Best: {best.strategy} ({format_inr(best.profit_inr)}).")
         head.append(f"  {len(passed)} cleared the promotion test "
                     f"(needs a deflated-Sharpe >= the bar AND positive returns).")
+        if wf:
+            head.append(f"  Walk-forward: {len(decayed)} strategies whose edge weakened "
+                        f"out-of-sample (full Sharpe ok, later Sharpe fell) - marked [decay].")
         if gaps:
             head.append(f"  {len(gaps)} skipped for lack of data: "
                         f"{', '.join(g.strategy for g in gaps)}.")
 
-        table = ["", "DETAIL (sorted by deflated Sharpe)", "-" * 78,
+        oos_h = f"{'oos_sh':>7} " if wf else ""
+        table = ["", "DETAIL (sorted by deflated Sharpe)", "-" * 88,
                  f"{'strategy':22} {'trades':>6} {'stocks':>6} {'P&L (1L notional)':>18} "
-                 f"{'win%':>5} {'sharpe':>7} {'dsr':>6} {'dd95':>7}  verdict"]
+                 f"{'win%':>5} {'sharpe':>7} {oos_h}{'dsr':>6} {'dd95':>7}  verdict"]
         for r in sorted(self.results, key=lambda x: (x.data_gap, -x.deflated_sharpe)):
             if r.data_gap:
+                oos_c = f"{'-':>7} " if wf else ""
                 table.append(f"{r.strategy:22} {'-':>6} {'-':>6} {'no data':>18} "
-                             f"{'-':>5} {'-':>7} {'-':>6} {'-':>7}  skip (data gap)")
+                             f"{'-':>5} {'-':>7} {oos_c}{'-':>6} {'-':>7}  skip (data gap)")
                 continue
             dd = f"{r.mc_dd_p95:.2%}" if r.mc_dd_p95 is not None else "   n/a"
+            oos_c = ""
+            if wf:
+                oos_c = (f"{r.oos_sharpe:>7.2f} " if r.oos_sharpe is not None else f"{'n/a':>7} ")
             tag = " [L/S]" if r.long_short else ""
+            if r.oos_decayed():
+                tag += " [decay]"
             verdict = "PROMOTE" if r.passes else f"hold ({r.reason})"
             table.append(
                 f"{r.strategy:22} {r.trades:>6} {r.symbols_traded:>6} "
                 f"{format_inr(r.profit_inr):>18} {r.win_rate*100:>4.0f}% "
-                f"{r.sharpe:>7.2f} {r.deflated_sharpe:>6.2f} {dd:>7}  {verdict}{tag}"
+                f"{r.sharpe:>7.2f} {oos_c}{r.deflated_sharpe:>6.2f} {dd:>7}  {verdict}{tag}"
             )
         return "\n".join(head + table)
 
@@ -251,6 +274,39 @@ def portfolio_returns(
     return daily
 
 
+def _ann_sharpe(returns: pd.Series, periods_per_year: int = 252) -> float:
+    """Annualized Sharpe of a daily return series (0 if degenerate)."""
+    r = returns.dropna()
+    if len(r) < 2:
+        return 0.0
+    sd = float(r.std(ddof=1))
+    return float(r.mean() / sd * (periods_per_year ** 0.5)) if sd > 0 else 0.0
+
+
+def walk_forward_oos(returns: pd.Series, train: int = 252, test: int = 63) -> tuple[float, int]:
+    """Time-based out-of-sample Sharpe (E2): hold out the first ``train`` bars as
+    burn-in, then score the strategy only on the stitched *later* rolling
+    ``test`` windows it never got a warm-up advantage on.
+
+    These strategies use fixed, a-priori parameters (no per-window refitting), so
+    'train' here means "the history the strategy had already seen", not a grid
+    search — the point is to catch an edge that was real early then decayed while
+    the full-period Sharpe still looks fine. Returns ``(oos_sharpe, n_windows)``;
+    ``(0.0, 0)`` when there isn't enough history for one full window."""
+    from quant.backtest.validation import walk_forward_splits
+
+    rets = returns.dropna()
+    try:
+        splits = walk_forward_splits(len(rets), train, test)
+    except ValueError:
+        return 0.0, 0
+    if not splits:
+        return 0.0, 0
+    stitched = pd.concat([rets.iloc[test_sl] for _, test_sl in splits])
+    stitched = stitched[~stitched.index.duplicated(keep="first")]
+    return round(_ann_sharpe(stitched), 3), len(splits)
+
+
 def position_stats(positions: pd.DataFrame) -> dict:
     """Plain-English trade counters from a position frame: how many distinct
     stocks were ever held, and how many times a position was opened (a flat→
@@ -343,13 +399,22 @@ def run_gate(
     step: int = 1,
     universe_step: int = 5,
     progress: Callable[[dict], None] | None = None,
+    walk_forward: bool = False,
+    wf_train: int = 252,
+    wf_test: int = 63,
 ) -> GateReport:
     """Backtest every strategy over ``panel`` and apply the promotion gate.
 
     ``progress`` (optional) is called with ``{"i", "total", "phase", "strategy",
     "result"?}`` before ("start") and after ("done") each strategy, so a caller
     can stream live progress instead of staring at a frozen terminal. A strategy
-    declaring ``long_short = True`` is replayed with its short legs intact (E1)."""
+    declaring ``long_short = True`` is replayed with its short legs intact (E1).
+
+    ``walk_forward`` (E2) additionally reports each strategy's held-out
+    out-of-sample Sharpe (first ``wf_train`` bars as burn-in, scored on the
+    stitched later ``wf_test`` windows) so an edge that decayed over time is
+    visible even when its full-period Sharpe looks fine. It's a diagnostic — it
+    never changes the pass/fail decision."""
     strategies: list = list(per_symbol_strategies) + list(universe_strategies)
     n_trials = len(strategies)
     total = len(strategies)
@@ -363,6 +428,13 @@ def run_gate(
             except Exception:  # noqa: BLE001 - reporting must never break the run
                 pass
 
+    def _score(strat, positions, rets, long_short: bool) -> GateResult:
+        result = evaluate_strategy(strat.id, rets, n_trials, dsr_threshold, min_obs,
+                                   positions=positions, long_short=long_short)
+        if walk_forward and not result.data_gap:
+            result.oos_sharpe, result.oos_windows = walk_forward_oos(rets, wf_train, wf_test)
+        return result
+
     i = 0
     for strat in per_symbol_strategies:
         i += 1
@@ -370,8 +442,7 @@ def run_gate(
         long_short = bool(getattr(strat, "long_short", False))
         positions = replay_per_symbol(strat, panel, step=step, long_short=long_short)
         rets = portfolio_returns(positions, panel, fee_bps=fee_bps)
-        result = evaluate_strategy(strat.id, rets, n_trials, dsr_threshold, min_obs,
-                                   positions=positions, long_short=long_short)
+        result = _score(strat, positions, rets, long_short)
         report.results.append(result)
         _emit("done", i, strat.id, result)
     for strat in universe_strategies:
@@ -382,8 +453,7 @@ def run_gate(
         sub_panel = {s: panel[s] for s in symbols if s in panel}
         positions = replay_universe(strat, sub_panel, step=universe_step, long_short=long_short)
         rets = portfolio_returns(positions, sub_panel, fee_bps=fee_bps)
-        result = evaluate_strategy(strat.id, rets, n_trials, dsr_threshold, min_obs,
-                                   positions=positions, long_short=long_short)
+        result = _score(strat, positions, rets, long_short)
         report.results.append(result)
         _emit("done", i, strat.id, result)
     return report

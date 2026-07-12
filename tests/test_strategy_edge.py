@@ -9,13 +9,16 @@ import pandas as pd
 from ats.core.schemas import SignalModel, Stance
 from ats.services.strategies.backtest import (
     NOTIONAL_INR,
+    GateResult,
     evaluate_strategy,
     format_inr,
     portfolio_returns,
     position_stats,
     replay_universe,
+    run_gate,
+    walk_forward_oos,
 )
-from ats.services.strategies.base import UniverseStrategy
+from ats.services.strategies.base import Strategy, UniverseStrategy
 
 
 def _frame(close: np.ndarray) -> pd.DataFrame:
@@ -116,3 +119,53 @@ def test_profit_and_win_rate_are_populated():
     assert 0.0 <= r.win_rate <= 1.0 and r.win_rate > 0.9
     assert r.symbols_traded == 1
     assert format_inr(NOTIONAL_INR) == "Rs 1,00,000"
+
+
+# --- E2: walk-forward out-of-sample ----------------------------------------
+def test_walk_forward_oos_needs_a_full_window():
+    short = pd.Series(np.full(100, 0.001))
+    assert walk_forward_oos(short, train=252, test=63) == (0.0, 0)
+
+
+def test_walk_forward_oos_scores_the_held_out_tail():
+    rets = pd.Series(np.full(400, 0.001),
+                     index=pd.bdate_range("2022-01-01", periods=400))
+    oos, n = walk_forward_oos(rets, train=252, test=63)
+    assert n >= 1 and oos > 0        # steady gains persist out-of-sample
+
+
+def _result(sharpe, oos):
+    return GateResult("x", 300, sharpe, 0.1, -0.1, 0.5, -0.1, False, oos_sharpe=oos)
+
+
+def test_oos_decayed_flag():
+    assert _result(2.0, 0.5).oos_decayed() is True    # later Sharpe < half of full
+    assert _result(2.0, 1.8).oos_decayed() is False   # edge holds up
+    assert _result(2.0, None).oos_decayed() is False  # walk-forward didn't run
+    assert _result(-0.5, -2.0).oos_decayed() is False # already-losing: not "decay"
+
+
+class _Long(Strategy):
+    id = "long_test"
+    style = "trend"
+    min_bars = 5
+
+    def evaluate(self, symbol, df):
+        return SignalModel(strategy=self.id, symbol=symbol, stance=Stance.BUY,
+                           conviction=1.0, features={})
+
+
+def test_run_gate_walk_forward_populates_oos():
+    idx = pd.bdate_range("2021-01-01", periods=400, name="date")
+    close = 100.0 * (1.001 ** np.arange(400))
+    panel = {"S": pd.DataFrame(
+        {"open": close, "high": close + 0.5, "low": close - 0.5,
+         "close": close, "volume": np.full(400, 1e6)}, index=idx)}
+    report = run_gate(panel, per_symbol_strategies=[_Long()], universe_strategies=[],
+                      dsr_threshold=0.5, min_obs=20, step=1, walk_forward=True)
+    r = report.results[0]
+    assert r.oos_sharpe is not None and r.oos_windows >= 1
+    # And a plain run leaves it untouched (diagnostic is opt-in).
+    plain = run_gate(panel, per_symbol_strategies=[_Long()], universe_strategies=[],
+                     dsr_threshold=0.5, min_obs=20, step=1)
+    assert plain.results[0].oos_sharpe is None
