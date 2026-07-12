@@ -33,6 +33,16 @@ hand-edit .env for it.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+
+# Make this runnable both as `python -m scripts.kite_login` (repo root already
+# on sys.path) and as a direct file path like `python scripts\kite_login.py`
+# or `python -u "C:\...\scripts\kite_login.py"` (Python only puts the
+# script's own directory, scripts\, on sys.path — the ats/ package one level
+# up would otherwise 404 with "No module named 'ats'").
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 
 def main() -> int:
@@ -72,7 +82,7 @@ def main() -> int:
         qs = parse_qs(urlparse(pasted).query)
         request_token = (qs.get("request_token") or [""])[0]
     else:
-        request_token = pasted
+        request_token = pasted  # they pasted the bare token, not a full URL
 
     if not request_token:
         print("Could not find request_token in that input.")
