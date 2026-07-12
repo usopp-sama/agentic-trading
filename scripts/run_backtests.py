@@ -43,9 +43,14 @@ log = get_logger("ats.backtest_gate")
 
 
 def _build_fundamentals(symbols: list[str]) -> dict[str, dict]:
-    """Snapshot fundamentals for the factor sleeves' value/quality/size legs."""
+    """Snapshot fundamentals for the factor sleeves' value/quality/size legs.
+
+    Circuit-breaks after 3 consecutive vendor failures (a blocked/rate-limited
+    Yahoo used to burn ~10s x 50 symbols of 401 retries per run) and falls back
+    to the latest persisted ``Fundamental`` rows instead."""
     provider = build_fundamentals_provider()
     out: dict[str, dict] = {}
+    consecutive = 0
     for sym in symbols:
         try:
             snap = provider.fetch(sym)
@@ -53,6 +58,35 @@ def _build_fundamentals(symbols: list[str]) -> dict[str, dict]:
             snap = None
         if snap is not None:
             out[sym] = snap.as_dict()
+            consecutive = 0
+        else:
+            consecutive += 1
+            if consecutive >= 3:
+                print("  (fundamentals vendor unreachable — using stored ratios)")
+                break
+
+    # DB fallback for anything the vendor didn't supply this run.
+    missing = [s for s in symbols if s not in out]
+    if missing:
+        from sqlalchemy import select
+
+        from ats.core.db import session_scope
+        from ats.core.models import Fundamental
+
+        with session_scope() as s:
+            for sym in missing:
+                row = s.execute(
+                    select(Fundamental).where(Fundamental.symbol == sym)
+                    .order_by(Fundamental.as_of.desc()).limit(1)
+                ).scalar_one_or_none()
+                if row is not None:
+                    out[sym] = {
+                        "symbol": row.symbol, "pe": row.pe, "pb": row.pb,
+                        "roe": row.roe, "debt_to_equity": row.debt_to_equity,
+                        "profit_margin": row.profit_margin,
+                        "dividend_yield": row.dividend_yield,
+                        "market_cap": row.market_cap,
+                    }
     return out
 
 

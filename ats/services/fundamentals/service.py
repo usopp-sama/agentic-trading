@@ -30,6 +30,7 @@ class FundamentalsService:
         self._md = None
         self._cache: dict[str, dict] = {}
         self._itypes: dict[str, str] = {}
+        self._consecutive_failures = 0
 
     def _load_instrument_types(self) -> None:
         """Cache instrument types so we never ask a data vendor for company
@@ -78,6 +79,7 @@ class FundamentalsService:
         symbols = self._md.watchlist() if self._md is not None else []
         refreshed = 0
         skipped = 0
+        self._consecutive_failures = 0   # fresh pass, fresh breaker
         for symbol in symbols:
             # Only equities have company fundamentals. Skip indices/ETFs/
             # commodities up front (known type, non-EQ) so we never make a
@@ -90,9 +92,17 @@ class FundamentalsService:
                 snap = self.provider.fetch(symbol)
             except Exception as exc:  # noqa: BLE001
                 log.warning("fundamentals_error", extra={"symbol": symbol, "error": str(exc)})
-                continue
+                snap = None
             if snap is None:
+                self._consecutive_failures += 1
+                # Circuit-break: a blocked/rate-limited vendor used to grind
+                # through the whole watchlist with ~10s of 401 retries each.
+                if self._consecutive_failures >= 3:
+                    log.warning("fundamentals_circuit_break",
+                                extra={"refreshed": refreshed})
+                    break
                 continue
+            self._consecutive_failures = 0
             self._cache[symbol] = snap.as_dict()
             self._persist(snap)
             refreshed += 1
