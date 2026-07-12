@@ -244,6 +244,7 @@ class CointegrationPairs(UniverseStrategy):
 
     id = "coint_pairs"
     style = "stat_arb"
+    long_short = True   # backtest with the short leg intact, not long-only (E1)
 
     def __init__(
         self,

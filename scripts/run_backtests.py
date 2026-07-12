@@ -156,6 +156,26 @@ def main() -> None:
     src = "synthetic" if args.offline else "kite" if args.kite else "yfinance"
     print(f"Loaded history for {len(panel)} instruments (source={src})\n")
 
+    # Live progress -> terminal AND a run log file, so the run is never a
+    # silently-frozen terminal and you can read afterwards how each strategy did.
+    run_log = Path(settings.metrics_dir)
+    run_log.mkdir(parents=True, exist_ok=True)
+    log_path = run_log / f"backtest_run_{date.today().isoformat()}.log"
+    log_fh = log_path.open("w", encoding="utf-8")
+
+    def emit_line(text: str) -> None:
+        print(text, flush=True)              # terminal
+        log_fh.write(text + "\n"); log_fh.flush()  # file
+
+    def on_progress(ev: dict) -> None:
+        if ev["phase"] == "start":
+            emit_line(f"[{ev['i']:>2}/{ev['total']}] testing {ev['strategy']} ...")
+        elif ev["phase"] == "done" and ev.get("result") is not None:
+            emit_line("        " + ev["result"].plain_english())
+
+    emit_line(f"Backtesting {len(panel)} instruments (source={src}, period={args.period}); "
+              f"DSR bar {dsr}. This walks every strategy over the whole window - hang tight.\n")
+
     universe_strategies = default_universe_strategies()
     _wire_fundamentals(universe_strategies, _build_fundamentals(list(panel.keys())))
     report = run_gate(
@@ -164,8 +184,13 @@ def main() -> None:
         universe_strategies=universe_strategies,
         dsr_threshold=dsr, min_obs=args.min_obs, fee_bps=5.0,
         step=args.step, universe_step=args.universe_step,
+        progress=on_progress,
     )
-    print(report.summary())
+    summary = report.summary()
+    print("\n" + summary)
+    log_fh.write("\n" + summary + "\n"); log_fh.flush()
+    log_fh.close()
+    print(f"\n(Full run log saved to {log_path})")
 
     # Persist the run for the research record.
     out_dir = Path(settings.metrics_dir)

@@ -23,6 +23,10 @@ with no API keys, no database server, and no internet strictly required.
 > [Safety model](#safety-model) and [Path to real money](#path-to-real-money) before
 > even thinking about live capital.
 
+> 📚 **New here?** Start with **[docs/00_READING_GUIDE.md](docs/00_READING_GUIDE.md)**
+> (a numbered path through every doc) and **[docs/01_SOURCE_GUIDE.md](docs/01_SOURCE_GUIDE.md)**
+> (a plain-language tour of the code).
+
 ---
 
 ## Table of contents

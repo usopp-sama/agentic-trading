@@ -22,6 +22,7 @@ is positive — mirroring the SME ``promotion_decision`` pattern.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -30,6 +31,30 @@ from ats.core.schemas import Stance
 from ats.services.strategies.base import Strategy, UniverseStrategy
 from quant.backtest.engine import backtest_signals
 from quant.backtest.validation import deflated_sharpe_ratio, monte_carlo_drawdowns
+
+# Notional starting capital used only to translate a strategy's return series
+# into a plain-rupee "made / lost this much" figure for the human-readable
+# report. It does NOT affect any statistic (Sharpe/DSR are scale-free).
+NOTIONAL_INR = 100_000.0
+
+
+def format_inr(x: float) -> str:
+    """Rupees with Indian digit grouping and an ASCII ``Rs`` prefix (never the
+    ₹ glyph — the Windows console is cp1252 and would crash on it)."""
+    n = int(round(x))
+    sign = "-" if n < 0 else ""
+    s = str(abs(n))
+    if len(s) <= 3:
+        grouped = s
+    else:
+        head, tail = s[:-3], s[-3:]
+        parts = []
+        while len(head) > 2:
+            parts.insert(0, head[-2:])
+            head = head[:-2]
+        parts.insert(0, head)
+        grouped = ",".join(parts) + "," + tail
+    return f"Rs {sign}{grouped}"
 
 
 @dataclass
@@ -43,6 +68,24 @@ class GateResult:
     mc_dd_p95: float | None
     passes: bool
     reason: str = ""
+    # --- plain-English extras (for a non-quant reader; no effect on scoring) ---
+    trades: int = 0            # number of times the strategy opened a position
+    symbols_traded: int = 0    # distinct stocks it ever held
+    profit_inr: float = 0.0    # P&L on NOTIONAL_INR of notional capital
+    win_rate: float = 0.0      # share of active days that were positive
+    long_short: bool = False   # scored with shorts (True) or long-only (False)
+    data_gap: bool = False     # n=0 because there was no data, not a real result
+
+    def plain_english(self) -> str:
+        """One sentence a finance-illiterate reader can follow."""
+        if self.data_gap:
+            return f"{self.strategy}: no data to test over this window (skipped, not judged)."
+        made = "made" if self.profit_inr >= 0 else "lost"
+        verdict = ("PASSED the promotion test" if self.passes
+                   else "did NOT pass the promotion test")
+        return (f"{self.strategy}: traded {self.symbols_traded} stock(s) over "
+                f"{self.trades} trade(s), {made} {format_inr(abs(self.profit_inr))} on "
+                f"{format_inr(NOTIONAL_INR)} - won {self.win_rate:.0%} of days - {verdict}.")
 
 
 @dataclass
@@ -53,24 +96,66 @@ class GateReport:
         return [r.strategy for r in self.results if r.passes]
 
     def summary(self) -> str:
-        lines = [f"{'strategy':22} {'n':>4} {'sharpe':>7} {'dsr':>6} {'dd95':>7}  verdict"]
-        for r in sorted(self.results, key=lambda x: x.deflated_sharpe, reverse=True):
+        """A legible report: a plain-English headline, then a columns table.
+
+        Columns: trades / stocks / P&L (on the notional) / win% are for human
+        intuition; sharpe / dsr / dd95 are the statistics the gate actually
+        decides on (dsr = deflated Sharpe, the multiple-testing-aware bar)."""
+        scored = [r for r in self.results if not r.data_gap]
+        gaps = [r for r in self.results if r.data_gap]
+        made = [r for r in scored if r.profit_inr > 0]
+        passed = [r for r in scored if r.passes]
+        best = max(scored, key=lambda x: x.profit_inr, default=None)
+
+        head = [
+            "=" * 78,
+            "PLAIN ENGLISH",
+            "-" * 78,
+            f"Tested {len(scored)} strategies on {format_inr(NOTIONAL_INR)} of pretend money each.",
+            f"  {len(made)} made money, {len(scored) - len(made)} lost money.",
+        ]
+        if best is not None:
+            head.append(f"  Best: {best.strategy} ({format_inr(best.profit_inr)}).")
+        head.append(f"  {len(passed)} cleared the promotion test "
+                    f"(needs a deflated-Sharpe >= the bar AND positive returns).")
+        if gaps:
+            head.append(f"  {len(gaps)} skipped for lack of data: "
+                        f"{', '.join(g.strategy for g in gaps)}.")
+
+        table = ["", "DETAIL (sorted by deflated Sharpe)", "-" * 78,
+                 f"{'strategy':22} {'trades':>6} {'stocks':>6} {'P&L (1L notional)':>18} "
+                 f"{'win%':>5} {'sharpe':>7} {'dsr':>6} {'dd95':>7}  verdict"]
+        for r in sorted(self.results, key=lambda x: (x.data_gap, -x.deflated_sharpe)):
+            if r.data_gap:
+                table.append(f"{r.strategy:22} {'-':>6} {'-':>6} {'no data':>18} "
+                             f"{'-':>5} {'-':>7} {'-':>6} {'-':>7}  skip (data gap)")
+                continue
             dd = f"{r.mc_dd_p95:.2%}" if r.mc_dd_p95 is not None else "   n/a"
+            tag = " [L/S]" if r.long_short else ""
             verdict = "PROMOTE" if r.passes else f"hold ({r.reason})"
-            lines.append(
-                f"{r.strategy:22} {r.n_obs:>4} {r.sharpe:>7.2f} "
-                f"{r.deflated_sharpe:>6.2f} {dd:>7}  {verdict}"
+            table.append(
+                f"{r.strategy:22} {r.trades:>6} {r.symbols_traded:>6} "
+                f"{format_inr(r.profit_inr):>18} {r.win_rate*100:>4.0f}% "
+                f"{r.sharpe:>7.2f} {r.deflated_sharpe:>6.2f} {dd:>7}  {verdict}{tag}"
             )
-        return "\n".join(lines)
+        return "\n".join(head + table)
 
 
-def _stance_position(stance: Stance) -> float:
-    # Long-only paper sleeves: bullish = held, everything else = flat.
-    return 1.0 if stance == Stance.BUY else 0.0
+def _stance_position(stance: Stance, long_short: bool = False) -> float:
+    """Map a stance to a target position. Long-only (default): BUY=held (1),
+    everything else flat (0). Long-short (E1): BUY=+1, SELL=-1, NEUTRAL=0 — so
+    inherently market-neutral sleeves (pairs/cointegration) are measured with
+    their short leg intact instead of silently flattened to long-only."""
+    if stance == Stance.BUY:
+        return 1.0
+    if long_short and stance == Stance.SELL:
+        return -1.0
+    return 0.0
 
 
 def replay_per_symbol(
-    strategy: Strategy, panel: dict[str, pd.DataFrame], step: int = 1
+    strategy: Strategy, panel: dict[str, pd.DataFrame], step: int = 1,
+    long_short: bool = False,
 ) -> pd.DataFrame:
     """Replay a per-symbol strategy; return a (date x symbol) position frame."""
     positions: dict[str, pd.Series] = {}
@@ -88,10 +173,8 @@ def replay_per_symbol(
                 sig = strategy.evaluate(sym, window)
             except Exception:  # noqa: BLE001 - a single bad bar must not abort the run
                 sig = None
-            if sig is not None and sig.stance != Stance.NEUTRAL:
-                last = _stance_position(sig.stance)
-            elif sig is not None and sig.stance == Stance.NEUTRAL:
-                last = 0.0
+            if sig is not None:
+                last = _stance_position(sig.stance, long_short=long_short)
             pos.iloc[t - 1] = last
         positions[sym] = pos
     if not positions:
@@ -100,16 +183,22 @@ def replay_per_symbol(
 
 
 def replay_universe(
-    strategy: UniverseStrategy, panel: dict[str, pd.DataFrame], step: int = 5
+    strategy: UniverseStrategy, panel: dict[str, pd.DataFrame], step: int = 5,
+    long_short: bool = False,
 ) -> pd.DataFrame:
-    """Replay a universe strategy; return a (date x symbol) position frame."""
+    """Replay a universe strategy; return a (date x symbol) position frame.
+
+    ``long_short`` keeps SELL legs as real short positions (-1) rather than
+    just flattening a holding — the difference between measuring a pairs
+    strategy as what it is vs. a mutilated long-only proxy."""
     if not panel:
         return pd.DataFrame()
     index = sorted({ts for df in panel.values() for ts in df.index})
     cols = list(panel.keys())
     pos = pd.DataFrame(0.0, index=pd.DatetimeIndex(index), columns=cols)
     warmup = min(getattr(strategy, "min_bars", 60), len(index))
-    held: set[str] = set()
+    # symbol -> current target position; absent = flat.
+    held: dict[str, float] = {}
     for i in range(warmup, len(index)):
         ts = index[i]
         if (i - warmup) % step == 0:
@@ -119,13 +208,14 @@ def replay_universe(
             except Exception:  # noqa: BLE001
                 signals = []
             for sig in signals:
-                if sig.stance == Stance.BUY:
-                    held.add(sig.symbol)
-                elif sig.stance in (Stance.SELL, Stance.NEUTRAL):
-                    held.discard(sig.symbol)
-        for sym in held:
+                target = _stance_position(sig.stance, long_short=long_short)
+                if target == 0.0:
+                    held.pop(sig.symbol, None)
+                else:
+                    held[sig.symbol] = target
+        for sym, target in held.items():
             if sym in pos.columns:
-                pos.at[ts, sym] = 1.0
+                pos.at[ts, sym] = target
     return pos
 
 
@@ -153,22 +243,63 @@ def portfolio_returns(
         return pd.Series(dtype=float)
     ret_frame = pd.concat(per_symbol, axis=1)
     pos_frame = positions.reindex(ret_frame.index).shift(1).fillna(0.0)
-    # Average only across names actually held that day; 0 when flat.
-    masked = ret_frame.where(pos_frame > 0)
+    # Average across names actually held that day (long OR short); 0 when flat.
+    # Each per-symbol return already carries the position's sign, so a short
+    # leg's gain-on-decline is counted correctly.
+    masked = ret_frame.where(pos_frame.abs() > 1e-9)
     daily = masked.mean(axis=1, skipna=True).fillna(0.0)
     return daily
+
+
+def position_stats(positions: pd.DataFrame) -> dict:
+    """Plain-English trade counters from a position frame: how many distinct
+    stocks were ever held, and how many times a position was opened (a flat→
+    held transition, long or short). No effect on scoring."""
+    if positions is None or positions.empty:
+        return {"trades": 0, "symbols_traded": 0}
+    trades = 0
+    symbols = 0
+    for sym in positions.columns:
+        held = positions[sym].fillna(0.0).abs() > 1e-9
+        if bool(held.any()):
+            symbols += 1
+            opened = held & ~held.shift(1, fill_value=False)
+            trades += int(opened.sum())
+    return {"trades": trades, "symbols_traded": symbols}
 
 
 def evaluate_strategy(
     strategy_id: str, returns: pd.Series, n_trials: int,
     dsr_threshold: float, min_obs: int,
+    positions: pd.DataFrame | None = None, long_short: bool = False,
+    notional: float = NOTIONAL_INR,
 ) -> GateResult:
-    """Score a strategy's return series and apply the promotion gate."""
+    """Score a strategy's return series and apply the promotion gate.
+
+    ``positions`` (optional) drives the plain-English trade counters; it never
+    affects the pass/fail decision, which rests only on the return series."""
     rets = returns.dropna()
     n = int((rets != 0).sum())  # active observations
-    if len(rets) < 2 or n < min_obs:
-        return GateResult(strategy_id, n, 0.0, 0.0, 0.0, 0.0, None, False,
-                          reason=f"only {n} active obs (<{min_obs})")
+    stats = position_stats(positions) if positions is not None else {"trades": 0, "symbols_traded": 0}
+
+    # Data gap vs. real result: no return series at all (or it never traded) is
+    # a *missing input*, not a performance verdict (E7). news_sentiment /
+    # nav_premium land here — they have no historical feed to replay over.
+    if len(rets) < 2 or n == 0:
+        return GateResult(
+            strategy_id, n, 0.0, 0.0, 0.0, 0.0, None, False,
+            reason="no data over this window (not judged)",
+            trades=stats["trades"], symbols_traded=stats["symbols_traded"],
+            long_short=long_short, data_gap=True,
+        )
+    if n < min_obs:
+        return GateResult(
+            strategy_id, n, 0.0, 0.0, 0.0, 0.0, None, False,
+            reason=f"only {n} active obs (<{min_obs})",
+            trades=stats["trades"], symbols_traded=stats["symbols_traded"],
+            long_short=long_short,
+        )
+
     equity = (1.0 + rets).cumprod()
     res = backtest_signals(equity, pd.Series(1.0, index=equity.index), fee_bps=0.0)
     sharpe = res.sharpe
@@ -189,9 +320,17 @@ def evaluate_strategy(
     reason = "" if passes else (
         "sharpe<=0" if sharpe <= 0 else f"dsr {dsr:.2f}<{dsr_threshold}"
     )
-    return GateResult(strategy_id, n, round(sharpe, 3), round(res.total_return, 4),
-                      round(res.max_drawdown, 4), round(dsr, 3),
-                      round(mc_dd, 4) if mc_dd is not None else None, passes, reason)
+    active = rets[rets != 0]
+    win_rate = float((active > 0).mean()) if len(active) else 0.0
+    profit_inr = float(notional * res.total_return)
+    return GateResult(
+        strategy_id, n, round(sharpe, 3), round(res.total_return, 4),
+        round(res.max_drawdown, 4), round(dsr, 3),
+        round(mc_dd, 4) if mc_dd is not None else None, passes, reason,
+        trades=stats["trades"], symbols_traded=stats["symbols_traded"],
+        profit_inr=round(profit_inr, 2), win_rate=round(win_rate, 4),
+        long_short=long_short,
+    )
 
 
 def run_gate(
@@ -203,22 +342,48 @@ def run_gate(
     fee_bps: float = 5.0,
     step: int = 1,
     universe_step: int = 5,
+    progress: Callable[[dict], None] | None = None,
 ) -> GateReport:
-    """Backtest every strategy over ``panel`` and apply the promotion gate."""
-    n_trials = len(per_symbol_strategies) + len(universe_strategies)
+    """Backtest every strategy over ``panel`` and apply the promotion gate.
+
+    ``progress`` (optional) is called with ``{"i", "total", "phase", "strategy",
+    "result"?}`` before ("start") and after ("done") each strategy, so a caller
+    can stream live progress instead of staring at a frozen terminal. A strategy
+    declaring ``long_short = True`` is replayed with its short legs intact (E1)."""
+    strategies: list = list(per_symbol_strategies) + list(universe_strategies)
+    n_trials = len(strategies)
+    total = len(strategies)
     report = GateReport()
+
+    def _emit(phase: str, i: int, sid: str, result: GateResult | None = None) -> None:
+        if progress is not None:
+            try:
+                progress({"i": i, "total": total, "phase": phase,
+                          "strategy": sid, "result": result})
+            except Exception:  # noqa: BLE001 - reporting must never break the run
+                pass
+
+    i = 0
     for strat in per_symbol_strategies:
-        positions = replay_per_symbol(strat, panel, step=step)
+        i += 1
+        _emit("start", i, strat.id)
+        long_short = bool(getattr(strat, "long_short", False))
+        positions = replay_per_symbol(strat, panel, step=step, long_short=long_short)
         rets = portfolio_returns(positions, panel, fee_bps=fee_bps)
-        report.results.append(
-            evaluate_strategy(strat.id, rets, n_trials, dsr_threshold, min_obs)
-        )
+        result = evaluate_strategy(strat.id, rets, n_trials, dsr_threshold, min_obs,
+                                   positions=positions, long_short=long_short)
+        report.results.append(result)
+        _emit("done", i, strat.id, result)
     for strat in universe_strategies:
+        i += 1
+        _emit("start", i, strat.id)
+        long_short = bool(getattr(strat, "long_short", False))
         symbols = strat.symbols() or list(panel.keys())
         sub_panel = {s: panel[s] for s in symbols if s in panel}
-        positions = replay_universe(strat, sub_panel, step=universe_step)
+        positions = replay_universe(strat, sub_panel, step=universe_step, long_short=long_short)
         rets = portfolio_returns(positions, sub_panel, fee_bps=fee_bps)
-        report.results.append(
-            evaluate_strategy(strat.id, rets, n_trials, dsr_threshold, min_obs)
-        )
+        result = evaluate_strategy(strat.id, rets, n_trials, dsr_threshold, min_obs,
+                                   positions=positions, long_short=long_short)
+        report.results.append(result)
+        _emit("done", i, strat.id, result)
     return report
