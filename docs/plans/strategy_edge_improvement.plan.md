@@ -23,6 +23,24 @@ was diagnosed from the actual code paths (cited), not generic advice.
 
 ---
 
+## ✅ Status (updated 2026-07-13) — where to resume
+
+| Item | What it does | Status |
+|---|---|---|
+| **E1** | long-short replay for stat-arb sleeves | ✅ **DONE** (merged) |
+| **E2** | walk-forward OOS Sharpe **+** param-grid plateau/curve-fit check | ✅ **DONE** (both halves, merged) |
+| **E3** | midcap universe for cross-sectional dispersion (`ATS_UNIVERSE_INCLUDE_MIDCAP`) | ✅ **DONE** ([PR #5](https://github.com/usopp-sama/agentic-trading/pull/5)) |
+| **E5** | st_reversal falling-knife filter + per-strategy tooling; core_allocation already had its asks | ✅ **DONE** (merged) |
+| **E7** | honest data-gap labeling | ✅ **DONE** (merged) |
+| — | realistic Indian fees, legible progress/stats, `--only`/`--n-trials` | ✅ **DONE** (merged) |
+| **E4** | two-stage screening gate (honest multiple-testing reduction) | ⬜ **OPEN** (~1 d) |
+| **E6** | ensemble instead of solo promotion | ⬜ **OPEN** (~1 d, exploratory) |
+
+**Resume at E4 or E6.** Full per-item build notes are in the *Build log* at the
+bottom. Everything below is the original spec, kept for reference.
+
+---
+
 ## E1 — Fix the long-only flattening of stat-arb strategies (0.5 d)
 
 **Diagnosis:** `ats/services/strategies/backtest.py::_stance_position` maps

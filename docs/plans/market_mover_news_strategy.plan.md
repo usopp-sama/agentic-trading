@@ -73,19 +73,74 @@ fuzzy cases, but the deterministic dictionary comes first (auditable, free, fast
 
 ## 2. The figure registry + India relevance mapping
 
-A config-driven registry of tracked figures, each with a **source weight** (how
-much the market cares) and a **market scope**:
+A config-driven registry of tracked figures, each with a **weight** (how much the
+market listens, 1–5), a **market scope**, and the **NSE read-through** (the actual
+trade). Kept in a `figures.yaml`-style config so it's editable without code. The
+list below is the seed; the `[data]` column flags where a *dated, mechanical*
+historical feed exists (the §0 constraint).
 
-| Figure / body | Weight | Direct market | India read-through (the NSE trade) |
+### 2a. India — political & policy (the cleanest, most direct signal)
+| Figure / body | Wt | NSE read-through | Data |
 |---|---|---|---|
-| Trump / White House | high | US | tariffs→IT/pharma/metals; risk-on/off→broad |
-| US Fed / Treasury | high | US/global | rates→banks, IT (USD), gold/silver |
-| Elon Musk | med | US (TSLA) | EV/auto ancillaries, battery/metals |
-| Jensen Huang (NVIDIA) | med | US (semis) | Indian IT, data-center/power proxies |
-| **Modi / PMO** | high | **India** | infra, defence, PSU, capex names — direct |
-| **Nitin Gadkari** | med | **India** | roads/infra (LT), autos, EV, cement — direct |
-| RBI Governor | high | India | banks, NBFCs, rates-sensitive |
-| Finance Minister / Budget | high | India | sector-specific per announcement |
+| **Narendra Modi** / PMO | 5 | infra, defence, PSU, railways, capex, "Make in India" | press, GDELT, X |
+| **Nirmala Sitharaman** (Finance Min) / Union Budget | 5 | sector-specific per announcement; taxes; PSU banks | press, GDELT |
+| **Nitin Gadkari** (Road Transport) | 4 | roads/infra (LT), autos, EV, cement, logistics | press, GDELT, X |
+| **RBI Governor** (Sanjay Malhotra) / MPC | 5 | banks, NBFCs, autos, realty (rate-sensitive) | RBI releases, GDELT |
+| **Piyush Goyal** (Commerce/Industry) | 3 | exports, trade deals, textiles, e-commerce | press, GDELT |
+| **Ashwini Vaishnaw** (Rail/IT/Telecom) | 3 | railways, semiconductors, telecom, electronics | press, GDELT |
+| **SEBI Chair** | 4 | brokers, AMCs, exchanges; F&O/margin rule changes | SEBI circulars |
+| **Hardeep Puri** (Petroleum) | 3 | OMCs (BPCL/IOC/HPCL), gas, ONGC | press |
+| **Amit Shah** (Home/Cooperation) | 3 | fertilizers, sugar/cooperatives, defence | press, GDELT |
+| Chief Economic Advisor / Economic Survey | 3 | macro tilt (cyclicals vs defensives) | Gov releases |
+| Key state CMs (UP/Maha/Guj/TN) | 2 | state-capex, power, realty in that state | press |
+
+### 2b. India — business leaders (company/sector specific)
+| Figure | Wt | NSE read-through | Data |
+|---|---|---|---|
+| **Mukesh Ambani** (Reliance) | 5 | RELIANCE, Jio/retail/energy, telecom | AGM, press |
+| **Gautam Adani** (Adani Group) | 5 | ADANIENT/PORTS/POWER/GREEN, ports, power | press, GDELT |
+| **N. Chandrasekaran** (Tata Sons) | 4 | TCS, TATAMOTORS, TATASTEEL, TATAPOWER, Titan | press |
+| **Anand Mahindra** | 3 | M&M, autos, EV, farm equipment | X, press |
+| **Uday Kotak** | 3 | KOTAKBANK, financials sentiment | X, press |
+| **Kumar M. Birla** (Aditya Birla) | 3 | GRASIM, HINDALCO, UltraTech, telecom (Vi) | press |
+| **Radhakishan Damani** | 2 | DMART, retail | filings, press |
+| Sanjiv Bajaj (Bajaj) | 2 | BAJFINANCE, BAJAJFINSV, auto | press |
+
+### 2c. US — political & central bank (global risk-on/off → NSE second-order)
+| Figure / body | Wt | India read-through | Data |
+|---|---|---|---|
+| **Trump / White House** | 5 | tariffs→IT/pharma/metals; USD→IT; risk-on/off→broad | Truth Social, GDELT |
+| **US Fed Chair (Powell)** / FOMC | 5 | rates→IT (USD), banks, gold/silver, FII flows | Fed, GDELT |
+| US Treasury Secretary | 4 | sanctions, tariffs, USD, bond yields | press, GDELT |
+| US Trade Rep (USTR) | 3 | trade deals, generic pharma, textiles, IT visas | press |
+| SEC Chair | 2 | global risk sentiment, ADR-listed Indian names | SEC, press |
+| Prominent stock-trading Congress members (Pelosi et al.) | 3 | sector tilt via disclosed trades (see §5) | **STOCK Act filings** |
+
+### 2d. US / global — business, tech & finance (theme → NSE sector)
+| Figure | Wt | India read-through | Data |
+|---|---|---|---|
+| **Elon Musk** | 4 | EV/auto ancillaries, battery/metals, "X/AI" sentiment | X, GDELT |
+| **Jensen Huang** (NVIDIA) | 4 | Indian IT, data-center/power, electronics | keynotes, GDELT |
+| **Sam Altman** (OpenAI) | 3 | Indian IT (AI demand/disruption both ways) | X, press |
+| Tim Cook (Apple) | 3 | Apple India suppliers (Dixon, electronics EMS) | press |
+| Warren Buffett / Berkshire | 3 | value/insurance sentiment; 13F cloning (§5) | 13F, press |
+| Jamie Dimon (JPMorgan) | 3 | global bank risk sentiment, credit | press |
+| Larry Fink (BlackRock) | 3 | EM/India allocation flows (FII) | letters, press |
+| Cathie Wood (ARK) | 2 | innovation/growth risk appetite; ARK holdings feed | ARK daily, press |
+| Bill Ackman / Michael Burry | 2 | activist/short signals, macro risk tone | X, 13F |
+
+### 2e. Global macro & commodities (India is a big importer → direct)
+| Figure / body | Wt | India read-through | Data |
+|---|---|---|---|
+| **OPEC / Saudi energy minister** | 4 | crude→OMCs, paints (ASIANPAINT), aviation, tyres | OPEC, GDELT |
+| ECB (Lagarde) / BoJ / PBoC | 3 | global liquidity → FII flows, metals (China) | press |
+| Xi Jinping / China stimulus | 3 | metals (TATASTEEL/HINDALCO), chemicals | GDELT |
+| IMF / World Bank / rating agencies | 3 | India rating/GDP → broad, banks, bond yields | reports |
+| Putin / Zelensky / geopolitics | 2 | crude, defence, gold/silver, wheat/fertilizer | GDELT |
+
+**Weights are a starting prior, not gospel** — Phase 4 should *learn* each figure's
+realized hit-rate on NSE and down-weight the noisy ones (per-figure attribution
+feeds straight back into the weight).
 
 **Two signal channels by scope:**
 - **Direct (Indian figures):** statement → NSE sector/name directly. Cleanest,
@@ -175,6 +230,91 @@ the trade by up to 45 days (the alpha may be gone). Fit for us:
 If, after all that, a **direct-Indian-figure** sleeve clears the gate with
 realistic costs, it's a genuine, tradeable edge. If it doesn't, we'll have learned
 that cheaply and honestly — which is the whole discipline of this project.
+
+---
+
+## 6b. Adjacent niche / high-yield strategy ideas (research shortlist)
+
+Scouted from the quant/hedge-fund public domain. These are the "not just another
+portfolio manager" ideas — most are **event/alt-data driven**, which is exactly
+the muscle the Bellwether plumbing (dated events → sentiment/mapping → event
+backtest) is building. Each is tagged **[NSE-ready]** (runs on data we can get for
+India today), **[paid-data]** (needs an alt-data vendor), or **[US-only]**.
+Rated by how well it fits *this* project.
+
+### The "insider echo" family (highest thematic fit)
+1. **Congressional / political disclosed trades** — trade in the direction of
+   lawmakers' STOCK Act filings (the "Pelosi tracker" effect). Retail-tracked via
+   **Quiver Quantitative** and **VertData** (43k+ congressional trades, Form-4
+   insider buys, 25 superinvestor 13Fs, ARK holdings, short interest). **[US-only]**
+   directly, but a natural extension of Bellwether's disclosed-trades track (§5),
+   and a US read-through basket can tilt Indian sectors. **Fit: very high.**
+2. **Corporate insider Form-4 clustering** — go long when *multiple* insiders buy
+   the same name in a short window (cluster buys beat lone buys). India: NSE/BSE
+   **insider-trading (SAST/PIT) disclosures** are public → **[NSE-ready]** with a
+   scraper. **Fit: high.**
+3. **13F superinvestor cloning** — replicate the quarterly holdings of proven
+   managers (Buffett, etc.); mind the ~45-day filing lag. **[US-only]** (India MF
+   monthly portfolio disclosures are the local analogue → **[NSE-ready]**).
+4. **Promoter pledge / stake-change signal (India)** — rising promoter share
+   pledges are a well-known red flag; promoter *buying* is a positive. Public in
+   NSE/BSE filings. **[NSE-ready]. Fit: high, India-native.**
+
+### Alternative-data signals
+5. **Unexpected Government Receivables (UGR)** — long stocks whose government
+   receivables jump; documented **5.4–7.1%/yr alpha**. Needs receivables data from
+   filings. **[paid-data / hard]** but high-alpha. India analogue: govt-capex order
+   wins (defence/rail/roads) — scrapeable from exchange announcements. **[NSE-ready]** in the India form.
+6. **Government contract / order-win announcements** — buy on large order-book
+   additions (defence: HAL/BEL; infra: LT; rail: titagarh/BEML). India exchange
+   "corporate announcements" feed. **[NSE-ready]. Fit: high** — pairs perfectly
+   with the Gadkari/Modi/defence figures above.
+7. **Lobbying spend** (Quiver) — firms that lobby more tend to outperform. **[US-only]**.
+
+### Market-microstructure / derivatives edges
+8. **Options dealer gamma exposure (GEX)** — when dealers are **short gamma** they
+   hedge pro-cyclically and *amplify* moves (trend/breakout regime); **long gamma**
+   dampens moves (mean-revert/fade regime). Used to pick which regime to run. NSE
+   has deep index/stock options → computable from the option chain. **[NSE-ready]**
+   (index first: NIFTY/BANKNIFTY). **Fit: high, and genuinely "quant-desk".**
+9. **F&O open-interest build-up** — long/short buildup vs long/short unwinding from
+   price+OI changes; classic NSE derivatives read. **[NSE-ready].**
+10. **Overnight vs intraday return decomposition** — a large body of research shows
+    most of the equity premium accrues **overnight**; buy-at-close/sell-at-open
+    variants. Trivially **[NSE-ready]** from OHLC we already store. **Fit: high,
+    cheap to test.**
+
+### Flow & positioning
+11. **FII/DII daily cash-flow signal (India)** — NSE/BSE publish daily net
+    FII/DII buy/sell; the structural **SIP/DII bid** is a real regime input.
+    **[NSE-ready], India-native. Fit: high.**
+12. **Short-interest / squeeze** — high short interest + a positive catalyst.
+    India short data is thin; **[US-only]** in the clean form.
+
+### Behavioural / anomaly (classic but underused here)
+13. **Reversal-in-PEAD** — the drift eventually over-shoots and reverses; a
+    second-leg trade after our existing `pead_drift`. **[NSE-ready].**
+14. **Lottery-stock avoidance / bet-against-beta** — we already have `low_vol_bab`;
+    the "avoid high-MAX lottery stocks" screen is a cheap overlay. **[NSE-ready].**
+
+**How these connect to Bellwether:** #1–#7 are all *dated-event → map-to-symbol →
+hold* strategies — **the same event-backtest engine (§4) runs all of them.** Build
+the engine once for the political-statement track, and these become mostly a new
+event source + mapping. #8–#11 are separate (microstructure/flow) sleeves that
+plug into the existing `run_gate`. Recommended near-term picks for *this* project:
+**gamma-exposure regime (#8), government order-wins (#6), promoter-pledge (#4),
+and FII/DII flow (#11)** — all NSE-ready, all genuinely "quant" rather than
+portfolio-manager, and all reusing plumbing we already have.
+
+> Sources: [Quiver Quantitative — Strategies](https://www.quiverquant.com/strategies/),
+> [QuantConnect × Quiver: Insider Trading dataset](https://www.quantconnect.com/docs/v2/writing-algorithms/datasets/quiver-quantitative/insider-trading),
+> [AInvest — Congressional trading patterns 2025](https://www.ainvest.com/news/political-insider-trading-dynamics-leveraging-congressional-patterns-strategic-investing-2025-2512/),
+> [QuantPedia — Six alt-data strategies (incl. UGR)](https://quantpedia.com/six-examples-of-trading-strategies-that-use-alternative-data/),
+> [QuantPedia — Post-Earnings Announcement Drift](https://quantpedia.com/strategies/post-earnings-announcement-effect),
+> [QuantPedia — Reversal in PEAD](https://quantpedia.com/strategies/reversal-in-post-earnings-announcement-drift),
+> [MenthorQ — Gamma in the real world](https://menthorq.com/guide/gamma-in-the-real-world/),
+> [NSE — FII/DII activity reports](https://www.nseindia.com/reports/fii-dii),
+> [awesome-quant (libraries/data)](https://github.com/wilsonfreitas/awesome-quant).
 
 ---
 

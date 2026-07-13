@@ -6,6 +6,24 @@ own port with expanded panels, user profiles + login, the Portfolio/Zerodha
 console revamp, Kite as the live market-data source — and the go-live
 checklist for the first 1-day and 1-week paper runs.
 
+## ✅ Status (updated 2026-07-13) — where to resume
+
+| Item | What it does | Status |
+|---|---|---|
+| stale-UI SW bug, Zerodha login, 3 keyed news APIs | see §0–§2 | ✅ **DONE** (merged) |
+| **L1** | news-credits + LLM burn-down cards on `/ops` | ✅ **DONE** (merged) |
+| **L2** | Kite as the live market-data source (`ATS_DATA_SOURCE=kite`, batched quotes, graceful fallback) | ✅ **DONE** (merged) |
+| **L6** | go-live hardening: watchdog health alerts, 08:45 IST pre-open GO/NO-GO email, nightly DB backup | ✅ **DONE** (merged) |
+| **L3** | Portfolio tab revamp + Zerodha console (live LTP rows, click-to-chart, Kite funds) | ⬜ **OPEN** (~2 d) |
+| **L4** | Ops Console on its own port (`ATS_OPS_PORT`), operator-only | ⬜ **OPEN** (~1.5 d) |
+| **L5** | user profiles + login portal (the multi-user groundwork) | ⬜ **OPEN** (~3 d, the big one) |
+
+**Resume at L3** (portfolio/Zerodha console) — it's the highest day-to-day value
+and doesn't touch the trade path. L4/L5 are observation/multi-user, buildable
+during a paper run. Full specs below.
+
+---
+
 ## 0. Root cause found: the stale-UI bug (FIXED this session)
 
 Categorized news tabs, the Ops polish, and the Minecraft popover fix all
