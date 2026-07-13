@@ -83,12 +83,16 @@ def _verdict(daily: pd.DataFrame, start: date, end: date) -> str:
 
 
 def collect_figure(client: GdeltClient, figure: Figure, start: date, end: date,
-                   sample: int = 25) -> FigureCorpus:
-    """Pull one figure's daily tone/volume + headline sample. Best-effort."""
+                   sample: int = 25, with_volume: bool = True) -> FigureCorpus:
+    """Pull one figure's daily tone (+ optional volume + headline sample).
+
+    GDELT's free API allows ~1 request / 5 s and penalises abusers, so keep the
+    call count low: ``tone`` is the signal (1 call), ``with_volume`` adds a 2nd,
+    ``sample`` > 0 adds a 3rd (headlines). Best-effort — never raises."""
     try:
         tone = client.timeline_tone(figure.query, start, end)
-        volume = client.timeline_volume(figure.query, start, end)
-        headlines = client.artlist(figure.query, start, end, maxrecords=sample)
+        volume = client.timeline_volume(figure.query, start, end) if with_volume else []
+        headlines = client.artlist(figure.query, start, end, maxrecords=sample) if sample > 0 else []
     except Exception as exc:  # noqa: BLE001 - one figure failing must not abort the run
         log.warning("figure_collect_failed", extra={"figure": figure.key, "error": str(exc)})
         tone, volume, headlines = [], [], []
@@ -97,7 +101,8 @@ def collect_figure(client: GdeltClient, figure: Figure, start: date, end: date,
 
 
 def collect(keys: list[str] | None = None, years: int = 3, sample: int = 25,
-            out_dir: Path | None = None, client: GdeltClient | None = None) -> dict:
+            out_dir: Path | None = None, client: GdeltClient | None = None,
+            with_volume: bool = True) -> dict:
     """Collect the corpus for the roster (or ``keys``) and write it to disk.
 
     Returns a manifest dict (also saved as ``manifest.json``). Per figure writes
@@ -111,7 +116,7 @@ def collect(keys: list[str] | None = None, years: int = 3, sample: int = 25,
 
     manifest_rows: list[dict] = []
     for fig in figures:
-        corpus = collect_figure(client, fig, start, end, sample=sample)
+        corpus = collect_figure(client, fig, start, end, sample=sample, with_volume=with_volume)
         if len(corpus.daily):
             corpus.daily.to_parquet(out_dir / f"{fig.key}_daily.parquet")
         (out_dir / f"{fig.key}_headlines.jsonl").write_text(

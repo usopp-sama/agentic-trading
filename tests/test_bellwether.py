@@ -124,6 +124,24 @@ def test_verdict_thresholds():
     assert _verdict(pd.DataFrame(columns=["tone", "volume"]), start, end) == "UNAVAILABLE"
 
 
+def test_fail_fast_gives_up_on_first_failure():
+    # max_retries=0 (what --fail-fast sets) -> one call, no backoff, figure skipped.
+    http = _FakeHttp([(429, None, "x"), (429, None, "x")])
+    client = GdeltClient(delay=0, max_retries=0, http_get=http, sleep=lambda _: None)
+    corpus = collect_figure(client, fig_mod.FIGURES["modi"], date(2023, 1, 1), date(2023, 1, 2))
+    assert corpus.verdict == "UNAVAILABLE" and http.calls == 1
+
+
+def test_with_volume_false_skips_the_volume_call():
+    tone = {"timeline": [{"data": [{"date": "20230101T000000Z", "value": 0.3}]}]}
+    arts = {"articles": []}
+    http = _FakeHttp([(200, tone, ""), (200, arts, "")])   # tone + artlist only
+    client = GdeltClient(delay=0, http_get=http, sleep=lambda _: None)
+    corpus = collect_figure(client, fig_mod.FIGURES["modi"], date(2023, 1, 1), date(2023, 1, 2),
+                            with_volume=False)
+    assert http.calls == 2 and len(corpus.daily) == 1     # no volume call made
+
+
 def test_collect_figure_uses_injected_client(monkeypatch):
     tone = {"timeline": [{"data": [{"date": "20230101T000000Z", "value": 0.3}]}]}
     vol = {"timeline": [{"data": [{"date": "20230101T000000Z", "value": 5.0}]}]}
