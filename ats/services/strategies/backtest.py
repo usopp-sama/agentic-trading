@@ -120,11 +120,14 @@ class GateReport:
         wf = any(r.oos_sharpe is not None for r in scored)   # walk-forward ran?
         decayed = [r for r in scored if r.oos_decayed()]
 
+        buy_c, sell_c = indian_cost_bps()
         head = [
             "=" * 88,
             "PLAIN ENGLISH",
             "-" * 88,
             f"Tested {len(scored)} strategies on {format_inr(NOTIONAL_INR)} of pretend money each.",
+            f"  P&L is AFTER realistic costs (Zerodha delivery: brokerage + STT + stamp + "
+            f"exchange + GST + SEBI ~ {buy_c:.1f} bps buy / {sell_c:.1f} bps sell).",
             f"  {len(made)} made money, {len(scored) - len(made)} lost money.",
         ]
         if best is not None:
@@ -242,17 +245,36 @@ def replay_universe(
     return pos
 
 
+def indian_cost_bps() -> tuple[float, float]:
+    """(buy_bps, sell_bps) for NSE delivery equity — the same charge stack the
+    paper broker applies (brokerage + STT + exchange + GST + SEBI + stamp),
+    expressed as per-side rates. Buy ≈ 5.5 bps, sell ≈ 14 bps."""
+    from ats.services.execution.fees import cost_bps
+
+    return cost_bps("BUY"), cost_bps("SELL")
+
+
 def portfolio_returns(
-    positions: pd.DataFrame, panel: dict[str, pd.DataFrame], fee_bps: float = 5.0
+    positions: pd.DataFrame, panel: dict[str, pd.DataFrame],
+    fee_bps: float | None = None,
+    buy_bps: float | None = None, sell_bps: float | None = None,
 ) -> pd.Series:
-    """Equal-weight long-only return of the held basket, fees on turnover.
+    """Equal-weight return of the held basket, net of realistic costs.
 
     Each held name contributes its own (look-ahead-safe) net return; the daily
     portfolio return is the average across names held that day, matching the
     equal-weight virtual sleeve the live ``SleeveTracker`` keeps.
+
+    Costs default to the **Indian per-side model** (buy vs sell differ because
+    STT is sell-side and stamp duty is buy-side) — the same frictions the live
+    paper broker charges — so a high-churn strategy pays for its turnover. Pass
+    ``fee_bps`` for a flat symmetric cost instead, or explicit ``buy_bps``/
+    ``sell_bps`` to override.
     """
     if positions.empty:
         return pd.Series(dtype=float)
+    if fee_bps is None and buy_bps is None and sell_bps is None:
+        buy_bps, sell_bps = indian_cost_bps()
     per_symbol = []
     for sym in positions.columns:
         df = panel.get(sym)
@@ -260,7 +282,8 @@ def portfolio_returns(
             continue
         prices = df["close"]
         pos = positions[sym].reindex(prices.index).ffill().fillna(0.0)
-        res = backtest_signals(prices, pos, fee_bps=fee_bps)
+        res = backtest_signals(prices, pos, fee_bps=fee_bps or 0.0,
+                               buy_bps=buy_bps, sell_bps=sell_bps)
         per_symbol.append(res.returns.rename(sym))
     if not per_symbol:
         return pd.Series(dtype=float)
@@ -395,7 +418,7 @@ def run_gate(
     universe_strategies: list[UniverseStrategy],
     dsr_threshold: float = 0.90,
     min_obs: int = 30,
-    fee_bps: float = 5.0,
+    fee_bps: float | None = None,   # None -> realistic Indian per-side costs
     step: int = 1,
     universe_step: int = 5,
     progress: Callable[[dict], None] | None = None,
