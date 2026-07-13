@@ -208,6 +208,16 @@ like "evaluated, failed."
     window. The stance-based strategies don't expose that yet; wiring it is a
     per-strategy effort (own workstream). The time-based OOS above is the
     honest, no-refit approximation that works on every strategy today.
+- **Realistic costs (operator ask).** The gate previously charged a flat 5 bps
+  on turnover — ~half the real Indian round-trip and blind to buy/sell
+  asymmetry. It now defaults to the **same charge stack the paper broker uses**
+  (`fees.cost_bps`: brokerage + STT + exchange + GST + SEBI + stamp) as
+  per-side rates (~5.5 bps buy / ~14 bps sell; STT is sell-side, stamp buy-side).
+  `backtest_signals` gained `buy_bps`/`sell_bps`; `run_gate`/`portfolio_returns`
+  default to the Indian model (`fee_bps` still overrides for a flat cost). The
+  report headline now states the assumption. This makes high-churn strategies
+  (turn_of_month, tech_confluence) pay honestly for their turnover — results get
+  slightly worse but truer. Unit-tested.
 
 **Still open (larger, multi-day):** E2 param-grid plateau, E4 two-stage gate,
 E3 midcap universe, E5 core_allocation/st_reversal tuning, E6 ensemble.

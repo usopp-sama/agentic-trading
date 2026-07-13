@@ -47,3 +47,29 @@ def compute_charges(side: str, qty: int, price: float) -> Charges:
     sebi = SEBI_RATE * turnover
     stamp = STAMP_BUY_RATE * turnover if is_buy else 0.0
     return Charges(brokerage, stt, exchange_txn, gst, sebi, stamp)
+
+
+def cost_fraction(side: str) -> float:
+    """Per-side transaction cost as a *fraction of turnover* — the same charge
+    stack as ``compute_charges`` but expressed as a rate, for the vectorized
+    backtester (which works in return/turnover space, not share lots).
+
+    The per-order ₹20 brokerage cap can't apply without an order size, so
+    brokerage is taken uncapped (``BROKERAGE_RATE``): exact for the small
+    per-name slices a diversified sleeve trades, and conservative (a slight
+    over-estimate) for very large single orders where the cap would bite."""
+    is_sell = side.upper() == "SELL"
+    is_buy = side.upper() == "BUY"
+    brokerage = BROKERAGE_RATE
+    stt = STT_SELL_RATE if is_sell else 0.0
+    exchange_txn = EXCHANGE_TXN_RATE
+    gst = GST_RATE * (brokerage + exchange_txn)
+    sebi = SEBI_RATE
+    stamp = STAMP_BUY_RATE if is_buy else 0.0
+    return brokerage + stt + exchange_txn + gst + sebi + stamp
+
+
+def cost_bps(side: str) -> float:
+    """Per-side cost in basis points (buy ≈ 5.5 bps, sell ≈ 14 bps — the STT on
+    the sell and stamp duty on the buy are the asymmetry)."""
+    return cost_fraction(side) * 10_000.0

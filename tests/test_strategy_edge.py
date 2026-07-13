@@ -121,6 +121,37 @@ def test_profit_and_win_rate_are_populated():
     assert format_inr(NOTIONAL_INR) == "Rs 1,00,000"
 
 
+# --- realistic Indian costs (brokerage + taxes) -----------------------------
+def test_cost_bps_asymmetry():
+    from ats.services.execution.fees import cost_bps
+    # STT (sell-side) makes selling far pricier than buying (stamp is buy-side).
+    assert cost_bps("SELL") > cost_bps("BUY")
+    assert 4.0 < cost_bps("BUY") < 8.0          # ~5.5 bps
+    assert 12.0 < cost_bps("SELL") < 16.0       # ~14 bps
+
+
+def test_engine_charges_asymmetric_buy_then_sell():
+    from quant.backtest.engine import backtest_signals
+    idx = pd.bdate_range("2023-01-01", periods=6)
+    prices = pd.Series(100.0, index=idx)                 # flat price: gross = 0
+    pos = pd.Series([0, 1, 1, 0, 0, 0], index=idx, dtype=float)  # one buy, one sell
+    res = backtest_signals(prices, pos, buy_bps=10.0, sell_bps=20.0)
+    # round trip pays buy + sell = 30 bps (tiny compounding aside).
+    assert abs(res.total_return - (-0.003)) < 1e-4
+
+
+def test_gate_default_costs_are_indian_and_penalize_churn():
+    idx = pd.bdate_range("2023-01-01", periods=20)
+    flat = pd.DataFrame({"open": 100.0, "high": 100.0, "low": 100.0,
+                         "close": 100.0, "volume": 1e6}, index=idx)
+    panel = {"X": flat}
+    churn = pd.DataFrame({"X": [i % 2 for i in range(20)]}, index=idx, dtype=float)
+    default_costs = portfolio_returns(churn, panel)              # Indian per-side
+    zero_costs = portfolio_returns(churn, panel, fee_bps=0.0)    # frictionless
+    assert abs(zero_costs.sum()) < 1e-9         # flat price, no fees -> ~0
+    assert default_costs.sum() < 0              # churn on a flat market loses to costs
+
+
 # --- E2: walk-forward out-of-sample ----------------------------------------
 def test_walk_forward_oos_needs_a_full_window():
     short = pd.Series(np.full(100, 0.001))

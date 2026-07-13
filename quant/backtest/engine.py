@@ -43,6 +43,8 @@ def backtest_signals(
     fee_bps: float = 1.0,
     periods_per_year: int = 252,
     risk_free_rate: float = 0.0,
+    buy_bps: float | None = None,
+    sell_bps: float | None = None,
 ) -> BacktestResult:
     """Backtest a target-position series against prices.
 
@@ -54,8 +56,13 @@ def backtest_signals(
         Desired exposure per bar, typically in ``{-1, 0, 1}`` (short, flat,
         long) but any float weight works. Aligned to ``prices``.
     fee_bps:
-        Round-trip-agnostic transaction cost in basis points, charged on
-        the *change* in position each bar.
+        Symmetric transaction cost in basis points, charged on the *change*
+        in position each bar. Used when ``buy_bps``/``sell_bps`` are None.
+    buy_bps, sell_bps:
+        Optional asymmetric costs (basis points) charged on the increase and
+        decrease in position respectively — e.g. Indian equity where STT is
+        sell-side and stamp duty is buy-side. When given they override
+        ``fee_bps``; either may be omitted (falls back to ``fee_bps``).
     periods_per_year:
         252 for daily bars, 12 for monthly, etc.
     risk_free_rate:
@@ -70,8 +77,19 @@ def backtest_signals(
     asset_ret = prices.pct_change().fillna(0.0)
     gross = pos_eff * asset_ret
 
-    turnover = pos_eff.diff().abs().fillna(pos_eff.abs())
-    cost = turnover * (fee_bps / 10_000.0)
+    # Position change each bar; the first bar is an entry from flat.
+    dpos = pos_eff.diff()
+    if len(dpos):
+        dpos.iloc[0] = pos_eff.iloc[0]
+    if buy_bps is None and sell_bps is None:
+        cost = dpos.abs() * (fee_bps / 10_000.0)
+    else:
+        b = (buy_bps if buy_bps is not None else fee_bps) / 10_000.0
+        s = (sell_bps if sell_bps is not None else fee_bps) / 10_000.0
+        # Increasing exposure = a buy; decreasing = a sell (each charged its own
+        # rate). Covers opening/closing shorts too: 0->-1 decreases (sell to
+        # open, STT applies), -1->0 increases (buy to cover).
+        cost = dpos.clip(lower=0.0) * b + (-dpos).clip(lower=0.0) * s
     net = gross - cost
 
     equity = (1.0 + net).cumprod()

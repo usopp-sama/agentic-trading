@@ -184,7 +184,7 @@ def main() -> None:
         panel,
         per_symbol_strategies=default_strategies(),
         universe_strategies=universe_strategies,
-        dsr_threshold=dsr, min_obs=args.min_obs, fee_bps=5.0,
+        dsr_threshold=dsr, min_obs=args.min_obs,   # costs: realistic Indian per-side model
         step=args.step, universe_step=args.universe_step,
         progress=on_progress, walk_forward=args.walk_forward,
     )
