@@ -393,9 +393,11 @@ class Settings(BaseSettings):
     high52_sell_near: float = 0.75
     # MACD + ADX trend
     macd_adx_min: float = 20.0
-    # Short-term reversal
+    # Short-term reversal (E5 trend filter: skip losers in a confirmed downtrend)
     st_reversal_lookback: int = 5
     st_reversal_decile: float = 0.2
+    st_reversal_adx_window: int = 14
+    st_reversal_adx_max: float = 25.0   # <=0 disables the falling-knife filter
     # OU / Keltner reversion
     ou_keltner_ema: int = 20
     ou_keltner_atr: int = 10

@@ -425,6 +425,7 @@ def run_gate(
     walk_forward: bool = False,
     wf_train: int = 252,
     wf_test: int = 63,
+    n_trials: int | None = None,
 ) -> GateReport:
     """Backtest every strategy over ``panel`` and apply the promotion gate.
 
@@ -439,7 +440,10 @@ def run_gate(
     visible even when its full-period Sharpe looks fine. It's a diagnostic — it
     never changes the pass/fail decision."""
     strategies: list = list(per_symbol_strategies) + list(universe_strategies)
-    n_trials = len(strategies)
+    # DSR's multiple-testing penalty scales with n_trials. It defaults to the
+    # number of strategies in THIS run, but can be pinned (e.g. to the 26-way
+    # baseline) so a subset re-run stays comparable to the full-gate numbers.
+    n_trials = n_trials if n_trials is not None else len(strategies)
     total = len(strategies)
     report = GateReport()
 

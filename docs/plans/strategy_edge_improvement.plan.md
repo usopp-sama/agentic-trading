@@ -218,9 +218,26 @@ like "evaluated, failed."
   report headline now states the assumption. This makes high-churn strategies
   (turn_of_month, tech_confluence) pay honestly for their turnover — results get
   slightly worse but truer. Unit-tested.
+- **E5 done.** `st_reversal` got the falling-knife trend filter: it no longer
+  BUYs a loser that is in a *confirmed* strong downtrend (ADX > `adx_max`=25
+  AND -DI > +DI), via `quant.analysis.indicators.adx` — config knobs
+  `st_reversal_adx_window`/`st_reversal_adx_max` (set max<=0 to disable). For
+  `core_allocation` the two E5 asks were **already in the code**: the crisis
+  defensive tilt (`_WEIGHTS["crisis"]` = 15/35/50 equity/gold/cash, applied on
+  `VOL_CRISIS` and rebalanced immediately on a regime flip) and a config-driven
+  cadence (`core_alloc_rebalance_days`, wired in `library.py`) — so the residual
+  is a *data* exercise: sweep the cadence on real Kite history. Tooling added:
+  `run_backtests.py --only <ids>` (test a subset in isolation) and `--n-trials N`
+  (pin the DSR penalty so a subset stays comparable to the 26-way baseline);
+  `run_gate` gained an `n_trials` override. Unit-tested.
+  - **To confirm on real data (needs your Kite token):**
+    `python scripts/run_backtests.py --kite --period 3y --only st_reversal --n-trials 26`
+    and compare DSR to the 0.44 baseline; sweep core_allocation with e.g.
+    `... --only core_allocation` after setting `ATS_CORE_ALLOC_REBALANCE_DAYS`
+    to each of {5,10,14,21}.
 
 **Still open (larger, multi-day):** E2 param-grid plateau, E4 two-stage gate,
-E3 midcap universe, E5 core_allocation/st_reversal tuning, E6 ensemble.
+E3 midcap universe, E6 ensemble.
 
 Total ≈ 7 working days. Re-run `python scripts/run_backtests.py --kite
 --period 3y` after each workstream to track DSR movement — that number, not
