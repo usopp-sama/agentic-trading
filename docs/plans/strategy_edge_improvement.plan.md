@@ -240,8 +240,18 @@ like "evaluated, failed."
     `... --only core_allocation` after setting `ATS_CORE_ALLOC_REBALANCE_DAYS`
     to each of {5,10,14,21}.
 
-**Still open (larger, multi-day):** E4 two-stage gate, E3 midcap universe,
-E6 ensemble.
+- **E3 done.** A curated, liquid NIFTY Midcap set (`reference.MIDCAP_UNIVERSE`,
+  ~57 names across sectors) is appended to the universe behind
+  `ATS_UNIVERSE_INCLUDE_MIDCAP` (off by default; `reference.active_universe()`
+  gates it, `bootstrap.seed_instruments` uses it). The runner now prints
+  **cross-sectional dispersion** (`backtest.cross_sectional_dispersion`) so the
+  breadth benefit is measurable: broadening 54→112 names raises how differently
+  names move on *real* data (synthetic names are homogeneous, so the number only
+  moves on the Kite/yfinance panel). Re-run the momentum/factor family with
+  `ATS_UNIVERSE_INCLUDE_MIDCAP=true python scripts/run_backtests.py --kite
+  --period 3y` on a fresh DB to re-score them with the added dispersion. Unit-tested.
+
+**Still open (larger, multi-day):** E4 two-stage gate, E6 ensemble.
 
 Total ≈ 7 working days. Re-run `python scripts/run_backtests.py --kite
 --period 3y` after each workstream to track DSR movement — that number, not

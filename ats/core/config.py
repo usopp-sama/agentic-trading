@@ -200,6 +200,12 @@ class Settings(BaseSettings):
     # real feed (the rest fell back to synthetic). Degradation halts NEW entries.
     feed_min_live_ratio: float = 0.5
     feed_halt_entries_on_degrade: bool = True
+    # E3: add the curated NIFTY Midcap set to the universe. Cross-sectional
+    # strategies (momentum/factor) need dispersion between names to find an edge;
+    # a large-cap-only book starves them of it, especially in a turmoil year when
+    # large-caps move together. Off by default so the original universe stays the
+    # reference for comparison runs.
+    universe_include_midcap: bool = False
 
     # --- Fundamentals ("synthetic" | "yfinance"; "auto" follows data_source) ---
     fundamentals_source: str = "auto"

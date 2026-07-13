@@ -374,6 +374,25 @@ def composite_series(panel: dict[str, pd.DataFrame], min_bars: int = 60) -> pd.S
     return pd.concat(norm, axis=1).mean(axis=1).dropna()
 
 
+def cross_sectional_dispersion(panel: dict[str, pd.DataFrame]) -> float:
+    """Mean daily cross-sectional stdev of returns across the panel — how much
+    names move *differently* from one another (E3). Cross-sectional strategies
+    (momentum/factor) need this dispersion to have anything to rank on; a
+    large-cap-only book in a macro-driven year has little of it. Broadening the
+    universe with midcaps should measurably raise this number."""
+    rets: dict[str, pd.Series] = {}
+    for sym, df in panel.items():
+        if df is None or df.empty:
+            continue
+        r = df["close"].pct_change()
+        if int(r.notna().sum()) > 10:
+            rets[sym] = r
+    if len(rets) < 2:
+        return 0.0
+    daily = pd.concat(rets, axis=1).std(axis=1, ddof=1)
+    return float(daily.mean())
+
+
 def plateau_probe(strat, prices: pd.Series, metric: str = "sharpe") -> float | None:
     """Parameter-robustness of a tunable strategy (E2). If ``strat`` opts in with
     ``param_grid()`` + ``signal_series(prices, **params)``, grid-search the metric

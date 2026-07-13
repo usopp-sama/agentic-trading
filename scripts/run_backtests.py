@@ -32,7 +32,10 @@ from ats.core.logging import configure_logging, get_logger  # noqa: E402
 from ats.core.models import Instrument, Strategy as StrategyRow  # noqa: E402
 from ats.services.bootstrap import seed_all  # noqa: E402
 from ats.services.fundamentals.providers import build_fundamentals_provider  # noqa: E402
-from ats.services.strategies.backtest import run_gate  # noqa: E402
+from ats.services.strategies.backtest import (  # noqa: E402
+    cross_sectional_dispersion,
+    run_gate,
+)
 from ats.services.strategies.library import (  # noqa: E402
     default_strategies,
     default_universe_strategies,
@@ -181,8 +184,13 @@ def main() -> None:
         elif ev["phase"] == "done" and ev.get("result") is not None:
             emit_line("        " + ev["result"].plain_english())
 
-    emit_line(f"Backtesting {len(panel)} instruments (source={src}, period={args.period}); "
-              f"DSR bar {dsr}. This walks every strategy over the whole window - hang tight.\n")
+    disp = cross_sectional_dispersion(panel)
+    midcap = "on" if settings.universe_include_midcap else "off"
+    emit_line(f"Backtesting {len(panel)} instruments (source={src}, period={args.period}, "
+              f"midcap={midcap}); DSR bar {dsr}.")
+    emit_line(f"Cross-sectional dispersion: {disp:.4f} (how differently names move - higher "
+              f"gives momentum/factor sleeves more to rank on).")
+    emit_line("This walks every strategy over the whole window - hang tight.\n")
 
     per_symbol_strategies = default_strategies()
     universe_strategies = default_universe_strategies()
