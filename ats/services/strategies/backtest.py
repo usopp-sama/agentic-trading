@@ -30,12 +30,21 @@ import pandas as pd
 from ats.core.schemas import Stance
 from ats.services.strategies.base import Strategy, UniverseStrategy
 from quant.backtest.engine import backtest_signals
-from quant.backtest.validation import deflated_sharpe_ratio, monte_carlo_drawdowns
+from quant.backtest.validation import (
+    deflated_sharpe_ratio,
+    grid_search,
+    monte_carlo_drawdowns,
+    plateau_ratio,
+)
 
 # Notional starting capital used only to translate a strategy's return series
 # into a plain-rupee "made / lost this much" figure for the human-readable
 # report. It does NOT affect any statistic (Sharpe/DSR are scale-free).
 NOTIONAL_INR = 100_000.0
+
+# Below this plateau ratio, a tunable strategy's best parameters sit on a spike
+# rather than a robust plateau — a curve-fit warning (E2). Diagnostic only.
+PLATEAU_MIN = 0.6
 
 
 def format_inr(x: float) -> str:
@@ -78,6 +87,13 @@ class GateResult:
     # --- walk-forward (E2): Sharpe on the held-out later part of the history ---
     oos_sharpe: float | None = None   # None unless walk-forward evaluation ran
     oos_windows: int = 0
+    # --- parameter robustness (E2): plateau vs curve-fit spike ---------------
+    plateau_ratio: float | None = None  # None unless a tunable strategy was probed
+
+    def is_curve_fit(self) -> bool:
+        """True when the best parameters sit on a spike, not a plateau — the
+        edge likely won't survive out of sample even if the DSR clears."""
+        return self.plateau_ratio is not None and self.plateau_ratio < PLATEAU_MIN
 
     def oos_decayed(self) -> bool:
         """True when the edge weakened materially out-of-sample: full Sharpe was
@@ -119,6 +135,8 @@ class GateReport:
         best = max(scored, key=lambda x: x.profit_inr, default=None)
         wf = any(r.oos_sharpe is not None for r in scored)   # walk-forward ran?
         decayed = [r for r in scored if r.oos_decayed()]
+        probed = any(r.plateau_ratio is not None for r in scored)  # any tunable strat probed?
+        curve_fit = [r for r in scored if r.is_curve_fit()]
 
         buy_c, sell_c = indian_cost_bps()
         head = [
@@ -137,32 +155,42 @@ class GateReport:
         if wf:
             head.append(f"  Walk-forward: {len(decayed)} strategies whose edge weakened "
                         f"out-of-sample (full Sharpe ok, later Sharpe fell) - marked [decay].")
+        if probed:
+            head.append(f"  Parameter check: {len(curve_fit)} tunable strategies whose best "
+                        f"settings sit on a spike not a plateau (likely curve-fit) - marked [curve-fit].")
         if gaps:
             head.append(f"  {len(gaps)} skipped for lack of data: "
                         f"{', '.join(g.strategy for g in gaps)}.")
 
         oos_h = f"{'oos_sh':>7} " if wf else ""
+        plat_h = f"{'plat':>5} " if probed else ""
         table = ["", "DETAIL (sorted by deflated Sharpe)", "-" * 88,
                  f"{'strategy':22} {'trades':>6} {'stocks':>6} {'P&L (1L notional)':>18} "
-                 f"{'win%':>5} {'sharpe':>7} {oos_h}{'dsr':>6} {'dd95':>7}  verdict"]
+                 f"{'win%':>5} {'sharpe':>7} {oos_h}{plat_h}{'dsr':>6} {'dd95':>7}  verdict"]
         for r in sorted(self.results, key=lambda x: (x.data_gap, -x.deflated_sharpe)):
             if r.data_gap:
                 oos_c = f"{'-':>7} " if wf else ""
+                plat_c = f"{'-':>5} " if probed else ""
                 table.append(f"{r.strategy:22} {'-':>6} {'-':>6} {'no data':>18} "
-                             f"{'-':>5} {'-':>7} {oos_c}{'-':>6} {'-':>7}  skip (data gap)")
+                             f"{'-':>5} {'-':>7} {oos_c}{plat_c}{'-':>6} {'-':>7}  skip (data gap)")
                 continue
             dd = f"{r.mc_dd_p95:.2%}" if r.mc_dd_p95 is not None else "   n/a"
             oos_c = ""
             if wf:
                 oos_c = (f"{r.oos_sharpe:>7.2f} " if r.oos_sharpe is not None else f"{'n/a':>7} ")
+            plat_c = ""
+            if probed:
+                plat_c = (f"{r.plateau_ratio:>5.2f} " if r.plateau_ratio is not None else f"{'-':>5} ")
             tag = " [L/S]" if r.long_short else ""
             if r.oos_decayed():
                 tag += " [decay]"
+            if r.is_curve_fit():
+                tag += " [curve-fit]"
             verdict = "PROMOTE" if r.passes else f"hold ({r.reason})"
             table.append(
                 f"{r.strategy:22} {r.trades:>6} {r.symbols_traded:>6} "
                 f"{format_inr(r.profit_inr):>18} {r.win_rate*100:>4.0f}% "
-                f"{r.sharpe:>7.2f} {oos_c}{r.deflated_sharpe:>6.2f} {dd:>7}  {verdict}{tag}"
+                f"{r.sharpe:>7.2f} {oos_c}{plat_c}{r.deflated_sharpe:>6.2f} {dd:>7}  {verdict}{tag}"
             )
         return "\n".join(head + table)
 
@@ -330,6 +358,40 @@ def walk_forward_oos(returns: pd.Series, train: int = 252, test: int = 63) -> tu
     return round(_ann_sharpe(stitched), 3), len(splits)
 
 
+def composite_series(panel: dict[str, pd.DataFrame], min_bars: int = 60) -> pd.Series:
+    """An equal-weight composite 'index' of the panel: each name normalized to
+    start at 1.0, then averaged. A single representative price series to grid-
+    search a strategy's parameters against for the plateau/curve-fit probe (E2)."""
+    norm: list[pd.Series] = []
+    for df in panel.values():
+        if df is None or df.empty:
+            continue
+        c = df["close"].dropna()
+        if len(c) >= min_bars and float(c.iloc[0]) > 0:
+            norm.append(c / float(c.iloc[0]))
+    if not norm:
+        return pd.Series(dtype=float)
+    return pd.concat(norm, axis=1).mean(axis=1).dropna()
+
+
+def plateau_probe(strat, prices: pd.Series, metric: str = "sharpe") -> float | None:
+    """Parameter-robustness of a tunable strategy (E2). If ``strat`` opts in with
+    ``param_grid()`` + ``signal_series(prices, **params)``, grid-search the metric
+    over its grid on ``prices`` and return the plateau ratio (mean of the top few
+    scores over the best) in [0, 1] — near 1 = robust plateau, low = curve-fit
+    spike. None for strategies that don't expose the probe or when it can't run."""
+    grid_fn = getattr(strat, "param_grid", None)
+    sig_fn = getattr(strat, "signal_series", None)
+    if grid_fn is None or sig_fn is None or prices is None or prices.empty:
+        return None
+    try:
+        _, results = grid_search(prices, sig_fn, grid_fn(), metric=metric)
+        by_param = {i: r[metric] for i, r in enumerate(results)}
+        return round(plateau_ratio(by_param), 3)
+    except Exception:  # noqa: BLE001 - a probe failure must never break the gate
+        return None
+
+
 def position_stats(positions: pd.DataFrame) -> dict:
     """Plain-English trade counters from a position frame: how many distinct
     stocks were ever held, and how many times a position was opened (a flat→
@@ -425,6 +487,7 @@ def run_gate(
     walk_forward: bool = False,
     wf_train: int = 252,
     wf_test: int = 63,
+    n_trials: int | None = None,
 ) -> GateReport:
     """Backtest every strategy over ``panel`` and apply the promotion gate.
 
@@ -439,9 +502,15 @@ def run_gate(
     visible even when its full-period Sharpe looks fine. It's a diagnostic — it
     never changes the pass/fail decision."""
     strategies: list = list(per_symbol_strategies) + list(universe_strategies)
-    n_trials = len(strategies)
+    # DSR's multiple-testing penalty scales with n_trials. It defaults to the
+    # number of strategies in THIS run, but can be pinned (e.g. to the 26-way
+    # baseline) so a subset re-run stays comparable to the full-gate numbers.
+    n_trials = n_trials if n_trials is not None else len(strategies)
     total = len(strategies)
     report = GateReport()
+    # Representative series for the parameter-robustness probe (E2). Built once,
+    # only when walk-forward hygiene is on (it's a diagnostic, not free).
+    composite = composite_series(panel) if walk_forward else pd.Series(dtype=float)
 
     def _emit(phase: str, i: int, sid: str, result: GateResult | None = None) -> None:
         if progress is not None:
@@ -456,6 +525,8 @@ def run_gate(
                                    positions=positions, long_short=long_short)
         if walk_forward and not result.data_gap:
             result.oos_sharpe, result.oos_windows = walk_forward_oos(rets, wf_train, wf_test)
+        if walk_forward and not composite.empty:
+            result.plateau_ratio = plateau_probe(strat, composite)  # None if not tunable
         return result
 
     i = 0

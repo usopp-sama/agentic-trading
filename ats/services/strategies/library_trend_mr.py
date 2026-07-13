@@ -279,10 +279,30 @@ class ShortTermReversal(UniverseStrategy):
     id = "st_reversal"
     style = "mean_reversion"
 
-    def __init__(self, lookback: int = 5, decile: float = 0.2, min_names: int = 5) -> None:
+    def __init__(self, lookback: int = 5, decile: float = 0.2, min_names: int = 5,
+                 adx_window: int = 14, adx_max: float = 25.0) -> None:
         self.lookback, self.decile = lookback, decile
         self.min_names = min_names
+        # E5 trend filter: don't buy a loser that is in a *confirmed* strong
+        # downtrend (a falling knife) — reversion's classic failure mode. adx_max
+        # <= 0 disables the filter.
+        self.adx_window, self.adx_max = adx_window, adx_max
         self.min_bars = lookback + 2
+
+    def _adverse_downtrend(self, df: pd.DataFrame) -> bool:
+        """True when the name is trending down with conviction: ADX above the
+        threshold AND -DI over +DI. Buying its dip is catching a falling knife.
+        Needs enough bars for ADX; too-short history reads as 'no trend' (safe)."""
+        if self.adx_max <= 0 or len(df) < self.adx_window + 2:
+            return False
+        try:
+            a = indicators.adx(df, self.adx_window)
+            adx_now = float(a["adx"].iloc[-1])
+            plus_di = float(a["plus_di"].iloc[-1])
+            minus_di = float(a["minus_di"].iloc[-1])
+        except Exception:  # noqa: BLE001 - a bad frame must not abort the sleeve
+            return False
+        return bool(np.isfinite(adx_now) and adx_now > self.adx_max and minus_di > plus_di)
 
     def evaluate_universe(self, history: dict[str, pd.DataFrame]) -> list[SignalModel]:
         ret: dict[str, float] = {}
@@ -302,6 +322,9 @@ class ShortTermReversal(UniverseStrategy):
         winners = list(ranked.tail(n_side).index)
         signals: list[SignalModel] = []
         for sym in losers:
+            # Skip the bounce trade when the loser is in a confirmed downtrend.
+            if self._adverse_downtrend(history[sym]):
+                continue
             conv = min(1.0, 0.4 + 2.0 * abs(ret[sym]))
             signals.append(self._signal(sym, Stance.BUY, conv, ret=round(ret[sym], 4)))
         for sym in winners:

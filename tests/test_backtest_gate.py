@@ -74,6 +74,21 @@ def test_gate_promotes_winner_holds_flat():
     assert not by_id["always_flat"].passes
 
 
+def test_gate_n_trials_override_penalizes_dsr():
+    # Pinning n_trials higher applies a bigger multiple-testing penalty, so the
+    # same strategy's deflated Sharpe drops. Lets a --only subset stay comparable
+    # to the full 26-way baseline (E5b).
+    rng = np.random.default_rng(0)
+    daily = 0.0006 + 0.011 * rng.standard_normal(300)   # moderate Sharpe (~0.9), unsaturated DSR
+    close = 100.0 * np.cumprod(1.0 + daily)
+    panel = {"S": _frame(close)}
+    kw = dict(per_symbol_strategies=[_AlwaysLong()], universe_strategies=[],
+              dsr_threshold=0.5, min_obs=20, step=1)
+    dsr_solo = run_gate(panel, n_trials=1, **kw).results[0].deflated_sharpe
+    dsr_full = run_gate(panel, n_trials=200, **kw).results[0].deflated_sharpe
+    assert dsr_solo > dsr_full
+
+
 def test_gate_handles_real_strategy_without_crashing():
     panel = {"X": _frame(100.0 + 1.0 * np.arange(200))}
     report = run_gate(panel, per_symbol_strategies=[MacdAdxTrend()],

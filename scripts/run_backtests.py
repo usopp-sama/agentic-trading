@@ -62,7 +62,7 @@ def _build_fundamentals(symbols: list[str]) -> dict[str, dict]:
         else:
             consecutive += 1
             if consecutive >= 3:
-                print("  (fundamentals vendor unreachable — using stored ratios)")
+                print("  (fundamentals vendor unreachable - using stored ratios)")
                 break
 
     # DB fallback for anything the vendor didn't supply this run.
@@ -145,6 +145,12 @@ def main() -> None:
     ap.add_argument("--universe-step", type=int, default=5, help="universe replay stride")
     ap.add_argument("--walk-forward", action="store_true",
                     help="also report held-out out-of-sample Sharpe (E2) to flag decayed edges")
+    ap.add_argument("--only", default=None,
+                    help="comma-separated strategy ids to test in isolation, e.g. "
+                         "'st_reversal,core_allocation' (iterate on E5 without the full 26-way run)")
+    ap.add_argument("--n-trials", type=int, default=None,
+                    help="pin the DSR multiple-testing penalty (default: #strategies in this run). "
+                         "Use --n-trials 26 with --only to keep DSR comparable to the full-gate baseline")
     ap.add_argument("--apply", action="store_true", help="promote cleared shadows to paper")
     args = ap.parse_args()
 
@@ -178,15 +184,27 @@ def main() -> None:
     emit_line(f"Backtesting {len(panel)} instruments (source={src}, period={args.period}); "
               f"DSR bar {dsr}. This walks every strategy over the whole window - hang tight.\n")
 
+    per_symbol_strategies = default_strategies()
     universe_strategies = default_universe_strategies()
+    if args.only:
+        wanted = {s.strip() for s in args.only.split(",") if s.strip()}
+        per_symbol_strategies = [s for s in per_symbol_strategies if s.id in wanted]
+        universe_strategies = [s for s in universe_strategies if s.id in wanted]
+        found = {s.id for s in per_symbol_strategies} | {s.id for s in universe_strategies}
+        missing = wanted - found
+        if missing:
+            emit_line(f"  (--only: unknown strategy id(s) skipped: {', '.join(sorted(missing))})")
+        emit_line(f"  (--only: testing {len(found)} strateg(ies): {', '.join(sorted(found))}; "
+                  f"DSR n_trials={args.n_trials or len(found)})")
     _wire_fundamentals(universe_strategies, _build_fundamentals(list(panel.keys())))
     report = run_gate(
         panel,
-        per_symbol_strategies=default_strategies(),
+        per_symbol_strategies=per_symbol_strategies,
         universe_strategies=universe_strategies,
         dsr_threshold=dsr, min_obs=args.min_obs,   # costs: realistic Indian per-side model
         step=args.step, universe_step=args.universe_step,
         progress=on_progress, walk_forward=args.walk_forward,
+        n_trials=args.n_trials,
     )
     summary = report.summary()
     print("\n" + summary)
