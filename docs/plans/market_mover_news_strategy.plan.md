@@ -211,6 +211,72 @@ the trade by up to 45 days (the alpha may be gone). Fit for us:
 
 ---
 
+## 5b. The US-market track via **Alpaca** (trade the *direct* link)
+
+**Why this is the single biggest upgrade to the whole idea.** The plan's weakest
+seam (§6) is that US figures — Trump, Musk, Huang, the Fed — hit **US stocks
+directly** but reach NSE only as **second-order noise** (global risk-on/off). We
+were about to trade a faint echo. **Alpaca removes that compromise:** it's a free
+US brokerage + market-data API, so when Musk tweets we can just trade **TSLA**;
+when Huang keynotes, **NVDA / SMH**; when Trump threatens tariffs, the actual
+**affected US names/sectors** — a *first-order* relationship we can measure,
+instead of a diluted India proxy.
+
+**What Alpaca gives us (free "Basic" plan):**
+- **7+ years of historical bars** (daily + minute) → enough for the same 3-year
+  event-backtest we're building, but on US equities where the signal is direct.
+- **Real-time quotes free via IEX** (~2.5% of volume) and **15-min-delayed SIP**
+  free on all feeds — fine for a daily/EOD news-reaction strategy (we are *not*
+  HFT; if we ever need full consolidated real-time, that's a paid upgrade).
+- **Free paper-trading accounts** with a real order API — so the *live-forward*
+  version (P6) can paper-trade US names with zero capital and zero cost.
+- Clean REST + `alpaca-py` SDK; API-key + secret in `.env`
+  (`ATS_ALPACA_KEY` / `ATS_ALPACA_SECRET`), same secrets discipline as Kite.
+
+**How it slots into what we've built — one engine, two markets:**
+- A new **`AlpacaDataSource`** mirrors the `KiteLiveSource` `poll()/quote()/
+  intraday()` seam we already built in L2, so the market-data layer is
+  market-agnostic. `ATS_DATA_SOURCE=alpaca` or a per-sleeve market tag.
+- The **event-backtest engine (§4) is reused unchanged** — it just takes a US
+  price panel (Alpaca) instead of an NSE panel (Kite). The timeline of dated
+  statements is the same; only the symbol map + panel differ.
+- A **US entity→ticker map** replaces the India read-through for US figures:
+  Musk→`TSLA`; Huang→`NVDA`,`SMH`; Cook→`AAPL`; Altman→`MSFT`,`NVDA`;
+  Trump-tariff→sector ETFs (`XLK`/`XLV`/`XLE`/`SMH`) or named exporters;
+  Fed→`XLF`,`TLT`,`GLD`. Deterministic dictionary, same pattern as the NSE map.
+- **US cost model:** commissions are ~$0 at Alpaca, but model **SEC + FINRA TAF
+  fees + spread/slippage** so US P&L is as honest as the Indian `fees.cost_bps`
+  we wired. A small `us_fees.py` mirrors the Indian one.
+- **The "insider echo" track (§5, §6b #1) becomes directly tradeable** here:
+  congressional/Form-4 disclosures are US names — with Alpaca we trade them for
+  real (paper) instead of shelving them.
+
+**Which figures route to which market (first-order wins):**
+| Figure class | Market it moves *first* | Data source |
+|---|---|---|
+| Modi, Gadkari, RBI, FM, SEBI | **NSE** | Kite |
+| Musk, Huang, Cook, Altman, US CEOs | **US** | **Alpaca** |
+| Trump, Fed, Treasury, OPEC | **both** — run a US sleeve (Alpaca) *and* an NSE read-through sleeve (Kite); compare which actually pays | Alpaca + Kite |
+
+**Honesty (unchanged discipline):** the US market is deeper and more arbitraged,
+so news-reaction alpha there is even thinner and faster — but the *link* is real
+and measurable (Musk↔TSLA is a fact; Musk↔NSE is a hope). We still judge every US
+sleeve with the **same DSR / walk-forward / plateau gate + realistic fees**. No
+special pleading for US just because the data is nicer.
+
+**Phasing:** insert **P0.5 — Alpaca data spike** (a `scripts/alpaca_spike.py`
+twin of the GDELT one: confirm 7y of bars for TSLA/NVDA/AAPL + a paper key works)
+right after the GDELT P0. Then P2/P4 gain a US map + US panel path. Wiring the US
+paper broker into the live 3-loop engine is **explicitly deferred** (operator's
+call) — the backtest + US paper account come first.
+
+> Sources: [Alpaca — Market Data](https://alpaca.markets/data),
+> [Alpaca docs — About Market Data API](https://docs.alpaca.markets/us/docs/about-market-data-api),
+> [Alpaca — Real-time stock pricing (IEX/SIP)](https://docs.alpaca.markets/us/docs/real-time-stock-pricing-data),
+> [Alpaca — Fetch historical data](https://alpaca.markets/learn/fetch-historical-data).
+
+---
+
 ## 6. Honest reality checks (read before believing any P&L)
 
 - **Selection bias** (§0) — the biggest risk; enforced away by mechanical corpus
@@ -344,8 +410,9 @@ the live-forward version (collect from today, trade paper, skip the 3y backtest)
 
 | Phase | Deliverable | Effort | De-risks |
 |---|---|---|---|
-| **P0 — data spike** | Prove we can pull 3y of dated, mechanical GDELT records for 3–4 figures (Modi, Gadkari, Trump, Musk) with tone. A notebook/script + a saved sample corpus. | 1 d | The whole idea — do this FIRST |
-| **P1 — figure registry + collector** | `figures.py` registry (config-driven) + a historical collector → a dated `statements` table (source, ts, figure, text, url). | 1.5 d | corpus completeness |
+| **P0 — GDELT data spike** | Prove we can pull 3y of dated, mechanical GDELT records for 3–4 figures (Modi, Gadkari, Trump, Musk) with tone. `scripts/gdelt_spike.py` (built; run on an open network). | 1 d | The whole idea — do this FIRST |
+| **P0.5 — Alpaca data spike** | Prove 7y of Alpaca bars for TSLA/NVDA/AAPL + a free paper key works (`scripts/alpaca_spike.py`, twin of the GDELT one). Unlocks the direct US track (§5b). | 0.5 d | the US market path |
+| **P1 — figure registry + collector** | `figures.py` registry (config-driven, incl. market tag) + a historical collector → a dated `statements` table (source, ts, figure, text, url). | 1.5 d | corpus completeness |
 | **P2 — entity→symbol mapper** | Deterministic dictionary (figure/theme → NSE sector → symbols), reusing `reference.py` sectors; optional LLM fallback. Unit-tested on canned statements. | 1.5 d | the alpha logic |
 | **P3 — signal generator** | statement → FinBERT tone → sized, decaying per-symbol signal. Reuses `ats/services/nlp`. | 1 d | direction/sizing |
 | **P4 — event backtest harness** | Timeline replay reusing the panel + `fees` + `run_gate` stats + per-figure attribution + plain-English `Rs` report. | 2 d | honest measurement |
