@@ -318,6 +318,28 @@ portfolio-manager, and all reusing plumbing we already have.
 
 ---
 
+## Phase 0 — status (2026-07-13): tool built, awaiting a local run
+
+`scripts/gdelt_spike.py` is the Phase-0 probe. It queries the **free GDELT 2.0
+DOC API** (no key) for a roster of figures (Modi, Gadkari, RBI, Trump, Musk) and
+reports, per figure: how many **dated tone-points** GDELT returns over 3 years,
+day-coverage %, mean tone, and a sample of real dated headlines — then a plain
+**RICH / THIN / UNAVAILABLE** verdict. Output saved to
+`var/bellwether/gdelt_spike/`.
+
+It could **not** be validated from the build sandbox (no outbound internet — DNS
+`getaddrinfo` failures; a shared-IP GDELT `429` on the web-tool fallback). **Run
+it on your machine to get the real answer:**
+
+```
+python scripts/gdelt_spike.py                 # 5 figures, 3 years
+python scripts/gdelt_spike.py --delay 10      # if you hit HTTP 429, slow down
+```
+
+If the Indian-direct figures (Modi/Gadkari/RBI) come back **RICH**, Phase 0
+passes → proceed to P1. If everything is THIN even on an open network, pivot to
+the live-forward version (collect from today, trade paper, skip the 3y backtest).
+
 ## 7. Phased implementation (each phase independently useful)
 
 | Phase | Deliverable | Effort | De-risks |
