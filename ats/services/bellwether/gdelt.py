@@ -93,8 +93,15 @@ class GdeltClient:
     def _httpx_get(self, url: str, params: dict) -> tuple[int, dict | None, str]:  # pragma: no cover - network
         import httpx
 
-        resp = httpx.get(url, params=params, timeout=self.timeout,
-                         headers={"User-Agent": "bellwether-collector/0.1"})
+        # A connect/read timeout or DNS error is a network-level *exception*, not
+        # an HTTP status — map it to status 0 so get()'s backoff-retry handles it
+        # (and, if it never recovers, the collector skips that one figure rather
+        # than crashing the whole run).
+        try:
+            resp = httpx.get(url, params=params, timeout=self.timeout,
+                             headers={"User-Agent": "bellwether-collector/0.1"})
+        except Exception as exc:  # noqa: BLE001 - network layer; treat as retryable
+            return 0, None, f"network error: {exc}"
         body = None
         text = resp.text
         ctype = resp.headers.get("content-type", "")
@@ -120,7 +127,8 @@ class GdeltClient:
             self._last_call = time.monotonic()
             if status == 200 and body is not None:
                 return body
-            retryable = status == 429 or 500 <= status < 600
+            # status 0 = network error (timeout/DNS); 429 = rate limit; 5xx = server.
+            retryable = status in (0, 429) or 500 <= status < 600
             if retryable and attempt < self.max_retries:
                 wait = self.backoff * (2 ** attempt)
                 log.warning("gdelt_retry", extra={"status": status, "attempt": attempt + 1,

@@ -78,6 +78,24 @@ def test_client_retries_on_429_then_succeeds():
     assert len(slept) >= 2                        # backed off between retries
 
 
+def test_client_retries_on_network_error_status_zero():
+    # A connect/read timeout surfaces as status 0 (see _httpx_get) and must be
+    # retried like a 429 - the bug that crashed the operator's first run.
+    ok = {"timeline": [{"data": [{"date": "20230101T000000Z", "value": 0.1}]}]}
+    http = _FakeHttp([(0, None, "network error: ConnectTimeout"), (200, ok, "")])
+    client = GdeltClient(delay=0, backoff=0.0, max_retries=3, http_get=http, sleep=lambda _: None)
+    out = client.timeline_tone('"x"', date(2023, 1, 1), date(2023, 1, 2))
+    assert http.calls == 2 and out[0]["value"] == 0.1
+
+
+def test_collect_figure_degrades_when_network_dead():
+    # Every call fails at the network layer -> that figure is UNAVAILABLE, no raise.
+    http = _FakeHttp([(0, None, "dead")] * 20)
+    client = GdeltClient(delay=0, backoff=0.0, max_retries=2, http_get=http, sleep=lambda _: None)
+    corpus = collect_figure(client, fig_mod.FIGURES["trump"], date(2023, 1, 1), date(2023, 1, 2))
+    assert corpus.verdict == "UNAVAILABLE" and corpus.daily.empty
+
+
 def test_client_raises_after_exhausting_retries():
     http = _FakeHttp([(429, None, "x")] * 5)
     client = GdeltClient(delay=0, backoff=0.0, max_retries=2, http_get=http, sleep=lambda _: None)

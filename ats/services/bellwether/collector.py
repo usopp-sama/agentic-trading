@@ -27,7 +27,7 @@ import pandas as pd
 from ats.core.config import DATA_DIR
 from ats.core.logging import get_logger
 from ats.services.bellwether.figures import Figure, get_figures
-from ats.services.bellwether.gdelt import GdeltClient, GdeltError
+from ats.services.bellwether.gdelt import GdeltClient
 
 log = get_logger("ats.bellwether.collector")
 
@@ -89,7 +89,7 @@ def collect_figure(client: GdeltClient, figure: Figure, start: date, end: date,
         tone = client.timeline_tone(figure.query, start, end)
         volume = client.timeline_volume(figure.query, start, end)
         headlines = client.artlist(figure.query, start, end, maxrecords=sample)
-    except GdeltError as exc:
+    except Exception as exc:  # noqa: BLE001 - one figure failing must not abort the run
         log.warning("figure_collect_failed", extra={"figure": figure.key, "error": str(exc)})
         tone, volume, headlines = [], [], []
     daily = _merge_daily(tone, volume)
