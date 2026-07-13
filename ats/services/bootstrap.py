@@ -5,7 +5,7 @@ from __future__ import annotations
 from ats.core.db import session_scope
 from ats.core.logging import get_logger
 from ats.core.models import Instrument, Rule, RuleVersion, Strategy
-from ats.services.reference import GUARDRAILS, STRATEGIES, UNIVERSE
+from ats.services.reference import GUARDRAILS, STRATEGIES, active_universe
 
 log = get_logger("ats.bootstrap")
 
@@ -13,7 +13,7 @@ log = get_logger("ats.bootstrap")
 def seed_instruments() -> int:
     added = 0
     with session_scope() as s:
-        for symbol, name, sector, itype in UNIVERSE:
+        for symbol, name, sector, itype in active_universe():
             if s.get(Instrument, symbol) is None:
                 s.add(
                     Instrument(

@@ -11,6 +11,7 @@ from ats.services.strategies.backtest import (
     NOTIONAL_INR,
     GateResult,
     composite_series,
+    cross_sectional_dispersion,
     evaluate_strategy,
     format_inr,
     plateau_probe,
@@ -256,6 +257,27 @@ def test_gate_flags_curve_fit_parameters():
     assert by["robust_param"].plateau_ratio >= 0.6
     assert not by["robust_param"].is_curve_fit()
     assert "[curve-fit]" in report.summary()
+
+
+# --- E3: broaden the universe (midcaps) for cross-sectional dispersion --------
+def test_active_universe_midcap_flag_is_a_superset():
+    from ats.services.reference import MIDCAP_UNIVERSE, UNIVERSE, active_universe
+    base = active_universe(include_midcap=False)
+    wide = active_universe(include_midcap=True)
+    assert len(base) == len(UNIVERSE)
+    assert len(wide) == len(UNIVERSE) + len(MIDCAP_UNIVERSE)
+    assert {s for s, *_ in base}.issubset({s for s, *_ in wide})
+
+
+def test_cross_sectional_dispersion_rises_with_diverse_names():
+    same = 100.0 * (1.001 ** np.arange(120))
+    lockstep = {"A": _ohlc(same), "B": _ohlc(same)}              # move identically -> ~0
+    diverse = dict(
+        lockstep,
+        C=_ohlc(100.0 * (0.999 ** np.arange(120))),             # opposing trend
+        D=_ohlc(100.0 + 5.0 * np.sin(np.arange(120) / 3.0)),    # choppy
+    )
+    assert cross_sectional_dispersion(lockstep) < cross_sectional_dispersion(diverse)
 
 
 # --- E2: walk-forward out-of-sample ----------------------------------------

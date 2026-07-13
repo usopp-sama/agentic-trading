@@ -82,6 +82,95 @@ UNIVERSE: list[tuple[str, str, str, str]] = [
 ]
 
 
+# E3: a curated, liquid subset of the NIFTY Midcap universe (not the exact 150 —
+# membership drifts; this is a diverse, stable-symbol starter set). Adds the
+# cross-sectional *dispersion* the momentum/factor sleeves need. Gated behind
+# ATS_UNIVERSE_INCLUDE_MIDCAP so the large-cap-only book stays the reference.
+# A wrong/renamed symbol simply contributes no data (skipped), never a crash.
+MIDCAP_UNIVERSE: list[tuple[str, str, str, str]] = [
+    # Banking & Financials
+    ("BANKBARODA.NS", "Bank of Baroda", "Banking & Financials", "EQ"),
+    ("PNB.NS", "Punjab National Bank", "Banking & Financials", "EQ"),
+    ("IDFCFIRSTB.NS", "IDFC First Bank", "Banking & Financials", "EQ"),
+    ("FEDERALBNK.NS", "Federal Bank", "Banking & Financials", "EQ"),
+    ("CHOLAFIN.NS", "Cholamandalam Investment", "Banking & Financials", "EQ"),
+    ("MUTHOOTFIN.NS", "Muthoot Finance", "Banking & Financials", "EQ"),
+    ("SBICARD.NS", "SBI Cards", "Banking & Financials", "EQ"),
+    ("LICHSGFIN.NS", "LIC Housing Finance", "Banking & Financials", "EQ"),
+    # IT / Tech
+    ("PERSISTENT.NS", "Persistent Systems", "IT", "EQ"),
+    ("COFORGE.NS", "Coforge", "IT", "EQ"),
+    ("MPHASIS.NS", "Mphasis", "IT", "EQ"),
+    ("OFSS.NS", "Oracle Financial Services", "IT", "EQ"),
+    # Auto & ancillaries
+    ("TVSMOTOR.NS", "TVS Motor", "Auto", "EQ"),
+    ("ASHOKLEY.NS", "Ashok Leyland", "Auto", "EQ"),
+    ("BHARATFORG.NS", "Bharat Forge", "Auto", "EQ"),
+    ("BALKRISIND.NS", "Balkrishna Industries", "Auto", "EQ"),
+    ("MRF.NS", "MRF", "Auto", "EQ"),
+    # Pharma & Healthcare
+    ("LUPIN.NS", "Lupin", "Pharma", "EQ"),
+    ("AUROPHARMA.NS", "Aurobindo Pharma", "Pharma", "EQ"),
+    ("TORNTPHARM.NS", "Torrent Pharma", "Pharma", "EQ"),
+    ("ALKEM.NS", "Alkem Laboratories", "Pharma", "EQ"),
+    ("ZYDUSLIFE.NS", "Zydus Lifesciences", "Pharma", "EQ"),
+    ("MAXHEALTH.NS", "Max Healthcare", "Healthcare", "EQ"),
+    ("FORTIS.NS", "Fortis Healthcare", "Healthcare", "EQ"),
+    # Metals & Mining
+    ("SAIL.NS", "Steel Authority of India", "Metals", "EQ"),
+    ("NMDC.NS", "NMDC", "Metals", "EQ"),
+    ("JINDALSTEL.NS", "Jindal Steel & Power", "Metals", "EQ"),
+    ("NATIONALUM.NS", "National Aluminium", "Metals", "EQ"),
+    ("HINDZINC.NS", "Hindustan Zinc", "Metals", "EQ"),
+    # Cement & Infra
+    ("AMBUJACEM.NS", "Ambuja Cements", "Cement", "EQ"),
+    ("ACC.NS", "ACC", "Cement", "EQ"),
+    ("DALBHARAT.NS", "Dalmia Bharat", "Cement", "EQ"),
+    # Power & Energy
+    ("TATAPOWER.NS", "Tata Power", "Power", "EQ"),
+    ("GAIL.NS", "GAIL India", "Energy", "EQ"),
+    ("PETRONET.NS", "Petronet LNG", "Energy", "EQ"),
+    ("IGL.NS", "Indraprastha Gas", "Energy", "EQ"),
+    ("TORNTPOWER.NS", "Torrent Power", "Power", "EQ"),
+    # Consumer & Retail
+    ("GODREJCP.NS", "Godrej Consumer", "FMCG", "EQ"),
+    ("DABUR.NS", "Dabur India", "FMCG", "EQ"),
+    ("MARICO.NS", "Marico", "FMCG", "EQ"),
+    ("COLPAL.NS", "Colgate-Palmolive India", "FMCG", "EQ"),
+    ("VBL.NS", "Varun Beverages", "FMCG", "EQ"),
+    ("TRENT.NS", "Trent", "Retail", "EQ"),
+    ("JUBLFOOD.NS", "Jubilant FoodWorks", "Retail", "EQ"),
+    # Chemicals
+    ("PIDILITIND.NS", "Pidilite Industries", "Chemicals", "EQ"),
+    ("SRF.NS", "SRF", "Chemicals", "EQ"),
+    ("DEEPAKNTR.NS", "Deepak Nitrite", "Chemicals", "EQ"),
+    # Capital goods / Industrials
+    ("BEL.NS", "Bharat Electronics", "Defence", "EQ"),
+    ("HAL.NS", "Hindustan Aeronautics", "Defence", "EQ"),
+    ("CUMMINSIND.NS", "Cummins India", "Industrials", "EQ"),
+    ("POLYCAB.NS", "Polycab India", "Industrials", "EQ"),
+    ("HAVELLS.NS", "Havells India", "Consumer Durables", "EQ"),
+    ("VOLTAS.NS", "Voltas", "Consumer Durables", "EQ"),
+    ("DIXON.NS", "Dixon Technologies", "Consumer Durables", "EQ"),
+    # Realty & travel
+    ("GODREJPROP.NS", "Godrej Properties", "Realty", "EQ"),
+    ("OBEROIRLTY.NS", "Oberoi Realty", "Realty", "EQ"),
+    ("INDHOTEL.NS", "Indian Hotels", "Consumer Services", "EQ"),
+    ("IRCTC.NS", "IRCTC", "Consumer Services", "EQ"),
+]
+
+
+def active_universe(include_midcap: bool | None = None) -> list[tuple[str, str, str, str]]:
+    """The instrument universe to seed. Large-cap core always; the curated
+    NIFTY Midcap set appended when ``ATS_UNIVERSE_INCLUDE_MIDCAP`` is on (E3).
+    ``include_midcap`` overrides the config (used by tests)."""
+    if include_midcap is None:
+        from ats.core.config import get_settings
+
+        include_midcap = get_settings().universe_include_midcap
+    return UNIVERSE + MIDCAP_UNIVERSE if include_midcap else list(UNIVERSE)
+
+
 # Strategy registry: (id, name, type, status)
 STRATEGIES: list[tuple[str, str, str, str]] = [
     # The core ballast (plan §2): regime-aware ETF allocation. Paper from

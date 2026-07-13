@@ -23,6 +23,24 @@ was diagnosed from the actual code paths (cited), not generic advice.
 
 ---
 
+## ✅ Status (updated 2026-07-13) — where to resume
+
+| Item | What it does | Status |
+|---|---|---|
+| **E1** | long-short replay for stat-arb sleeves | ✅ **DONE** (merged) |
+| **E2** | walk-forward OOS Sharpe **+** param-grid plateau/curve-fit check | ✅ **DONE** (both halves, merged) |
+| **E3** | midcap universe for cross-sectional dispersion (`ATS_UNIVERSE_INCLUDE_MIDCAP`) | ✅ **DONE** ([PR #5](https://github.com/usopp-sama/agentic-trading/pull/5)) |
+| **E5** | st_reversal falling-knife filter + per-strategy tooling; core_allocation already had its asks | ✅ **DONE** (merged) |
+| **E7** | honest data-gap labeling | ✅ **DONE** (merged) |
+| — | realistic Indian fees, legible progress/stats, `--only`/`--n-trials` | ✅ **DONE** (merged) |
+| **E4** | two-stage screening gate (honest multiple-testing reduction) | ⬜ **OPEN** (~1 d) |
+| **E6** | ensemble instead of solo promotion | ⬜ **OPEN** (~1 d, exploratory) |
+
+**Resume at E4 or E6.** Full per-item build notes are in the *Build log* at the
+bottom. Everything below is the original spec, kept for reference.
+
+---
+
 ## E1 — Fix the long-only flattening of stat-arb strategies (0.5 d)
 
 **Diagnosis:** `ats/services/strategies/backtest.py::_stance_position` maps
@@ -240,8 +258,18 @@ like "evaluated, failed."
     `... --only core_allocation` after setting `ATS_CORE_ALLOC_REBALANCE_DAYS`
     to each of {5,10,14,21}.
 
-**Still open (larger, multi-day):** E4 two-stage gate, E3 midcap universe,
-E6 ensemble.
+- **E3 done.** A curated, liquid NIFTY Midcap set (`reference.MIDCAP_UNIVERSE`,
+  ~57 names across sectors) is appended to the universe behind
+  `ATS_UNIVERSE_INCLUDE_MIDCAP` (off by default; `reference.active_universe()`
+  gates it, `bootstrap.seed_instruments` uses it). The runner now prints
+  **cross-sectional dispersion** (`backtest.cross_sectional_dispersion`) so the
+  breadth benefit is measurable: broadening 54→112 names raises how differently
+  names move on *real* data (synthetic names are homogeneous, so the number only
+  moves on the Kite/yfinance panel). Re-run the momentum/factor family with
+  `ATS_UNIVERSE_INCLUDE_MIDCAP=true python scripts/run_backtests.py --kite
+  --period 3y` on a fresh DB to re-score them with the added dispersion. Unit-tested.
+
+**Still open (larger, multi-day):** E4 two-stage gate, E6 ensemble.
 
 Total ≈ 7 working days. Re-run `python scripts/run_backtests.py --kite
 --period 3y` after each workstream to track DSR movement — that number, not
