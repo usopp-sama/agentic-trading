@@ -10,8 +10,10 @@ from ats.core.schemas import SignalModel, Stance
 from ats.services.strategies.backtest import (
     NOTIONAL_INR,
     GateResult,
+    composite_series,
     evaluate_strategy,
     format_inr,
+    plateau_probe,
     portfolio_returns,
     position_stats,
     replay_universe,
@@ -184,6 +186,76 @@ def test_st_reversal_buys_the_loser_when_filter_disabled():
     sigs = st.evaluate_universe(_st_reversal_panel())
     buys = [s.symbol for s in sigs if s.stance == Stance.BUY]
     assert "AAA.NS" in buys                           # without the filter it catches the knife
+
+
+# --- E2: parameter-robustness (plateau vs curve-fit spike) -------------------
+class _AlwaysBuy(Strategy):
+    id = "always_buy"
+    style = "trend"
+    min_bars = 5
+
+    def evaluate(self, symbol, df):
+        return SignalModel(strategy=self.id, symbol=symbol, stance=Stance.BUY,
+                           conviction=1.0, features={})
+
+
+class _CliffTunable(_AlwaysBuy):
+    """Its 'edge' exists at exactly one parameter value — a curve-fit spike."""
+    id = "cliff_param"
+
+    def param_grid(self):
+        return {"k": [1, 2, 3, 4, 5]}
+
+    def signal_series(self, prices, k=3):
+        pos = pd.Series(0.0, index=prices.index)
+        if int(k) == 3:
+            pos[:] = 1.0
+        return pos
+
+
+class _RobustTunable(_CliffTunable):
+    """Its edge holds across a plateau of parameters (2, 3, 4)."""
+    id = "robust_param"
+
+    def signal_series(self, prices, k=3):
+        pos = pd.Series(0.0, index=prices.index)
+        if int(k) in (2, 3, 4):
+            pos[:] = 1.0
+        return pos
+
+
+def _uptrend_panel(n_syms: int = 3, bars: int = 160) -> dict:
+    up = 100.0 * (1.002 ** np.arange(bars))
+    return {f"S{i}": _ohlc(up) for i in range(n_syms)}
+
+
+def test_plateau_probe_on_real_tunable_strategy():
+    from ats.services.strategies.library import SmaCrossover
+    idx = pd.bdate_range("2022-01-01", periods=320)
+    prices = pd.Series(100.0 * (1.001 ** np.arange(320)), index=idx)
+    pr = plateau_probe(SmaCrossover(), prices)
+    assert pr is not None and 0.0 <= pr <= 1.0
+
+
+def test_plateau_probe_none_for_non_tunable():
+    idx = pd.bdate_range("2022-01-01", periods=100)
+    prices = pd.Series(100.0 + np.arange(100), index=idx)
+    assert plateau_probe(_AlwaysBuy(), prices) is None       # no param_grid/signal_series
+
+
+def test_gate_flags_curve_fit_parameters():
+    panel = _uptrend_panel()
+    assert not composite_series(panel).empty
+    report = run_gate(panel, per_symbol_strategies=[_CliffTunable(), _RobustTunable()],
+                      universe_strategies=[], dsr_threshold=0.5, min_obs=20, step=1,
+                      walk_forward=True)
+    by = {r.strategy: r for r in report.results}
+    # The one-value spike is flagged; the plateau across {2,3,4} is not.
+    assert by["cliff_param"].plateau_ratio is not None and by["cliff_param"].plateau_ratio < 0.6
+    assert by["cliff_param"].is_curve_fit()
+    assert by["robust_param"].plateau_ratio >= 0.6
+    assert not by["robust_param"].is_curve_fit()
+    assert "[curve-fit]" in report.summary()
 
 
 # --- E2: walk-forward out-of-sample ----------------------------------------

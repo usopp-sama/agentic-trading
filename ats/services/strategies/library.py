@@ -39,6 +39,18 @@ class SmaCrossover(Strategy):
             return self._signal(symbol, Stance.SELL, min(1.0, -gap * 20), gap=round(gap, 4))
         return self._signal(symbol, Stance.NEUTRAL, 0.0, gap=0.0)
 
+    # --- opt-in parameter-robustness probe (E2 plateau check) --------------
+    def param_grid(self) -> dict:
+        return {"fast": [10, 15, 20, 25, 30], "slow": [40, 50, 60]}
+
+    def signal_series(self, prices: pd.Series, fast: int = 20, slow: int = 50) -> pd.Series:
+        """Long-only target positions over the whole series (fast SMA above slow),
+        so ``quant.backtest.validation`` can grid-search the parameters and test
+        whether the chosen (fast, slow) sits on a robust plateau or a lucky spike."""
+        f = indicators.sma(prices, int(fast))
+        s = indicators.sma(prices, int(slow))
+        return (f > s).astype(float)
+
 
 class BollingerMeanReversion(Strategy):
     id = "mean_reversion"
@@ -61,6 +73,16 @@ class BollingerMeanReversion(Strategy):
         if pct_b > 1.0:
             return self._signal(symbol, Stance.SELL, min(1.0, pct_b - 1.0), pct_b=round(pct_b, 3))
         return self._signal(symbol, Stance.NEUTRAL, 0.0, pct_b=round(pct_b, 3))
+
+    # --- opt-in parameter-robustness probe (E2 plateau check) --------------
+    def param_grid(self) -> dict:
+        return {"window": [10, 15, 20, 25, 30], "num_std": [1.5, 2.0, 2.5]}
+
+    def signal_series(self, prices: pd.Series, window: int = 20, num_std: float = 2.0) -> pd.Series:
+        """Long-only target positions (long while price is below the lower band,
+        i.e. oversold) for the parameter-robustness grid search."""
+        bb = indicators.bollinger_bands(prices, int(window), float(num_std))
+        return (bb["pct_b"] < 0.0).astype(float)
 
 
 class VolumeBreakout(Strategy):

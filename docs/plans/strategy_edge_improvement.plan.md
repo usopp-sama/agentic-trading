@@ -202,12 +202,16 @@ like "evaluated, failed."
   windows (`walk_forward_oos` → `oos_sharpe`), and flag `[decay]` when the full
   Sharpe was positive but the held-out Sharpe fell below half of it. A new
   `oos_sh` column + headline line surface it. Unit-tested.
-  - **Deferred (the other half of E2):** the *parameter-grid* `plateau_ratio`
-    check needs each strategy to expose a `signal_fn(prices, **params)` +
-    param grid so `quant.backtest.validation.walk_forward()` can refit per
-    window. The stance-based strategies don't expose that yet; wiring it is a
-    per-strategy effort (own workstream). The time-based OOS above is the
-    honest, no-refit approximation that works on every strategy today.
+  - **E2 param-grid plateau — now done.** Strategies can opt into a
+    parameter-robustness probe by exposing `param_grid()` +
+    `signal_series(prices, **params)`. When `--walk-forward` is on, the gate
+    builds an equal-weight composite index of the panel and `grid_search`es each
+    tunable strategy over it, then `plateau_ratio` scores whether the best
+    parameters sit on a robust plateau (near 1.0) or a lucky spike (curve-fit).
+    A new `plat` column + `[curve-fit]` tag flag anything `< 0.6` (diagnostic
+    only — never changes pass/fail). `sma_crossover` and `mean_reversion` are
+    wired as the first opt-ins; more are a mechanical per-strategy addition.
+    Unit-tested with a known parameter cliff (flagged) vs a plateau (not).
 - **Realistic costs (operator ask).** The gate previously charged a flat 5 bps
   on turnover — ~half the real Indian round-trip and blind to buy/sell
   asymmetry. It now defaults to the **same charge stack the paper broker uses**
@@ -236,8 +240,8 @@ like "evaluated, failed."
     `... --only core_allocation` after setting `ATS_CORE_ALLOC_REBALANCE_DAYS`
     to each of {5,10,14,21}.
 
-**Still open (larger, multi-day):** E2 param-grid plateau, E4 two-stage gate,
-E3 midcap universe, E6 ensemble.
+**Still open (larger, multi-day):** E4 two-stage gate, E3 midcap universe,
+E6 ensemble.
 
 Total ≈ 7 working days. Re-run `python scripts/run_backtests.py --kite
 --period 3y` after each workstream to track DSR movement — that number, not
